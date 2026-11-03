@@ -228,4 +228,9 @@ dialog .field{max-width:none}
 dialog .seg{margin-bottom:6px}
 .btns{display:flex;justify-content:flex-end;gap:10px;margin-top:12px}
 
+/* пока идёт игра, лаунчер ничего не анимирует и не размывает: вся видеокарта игре */
+.gaming *,.gaming *::before,.gaming *::after{animation-play-state:paused!important}
+.gaming .bg{filter:none}
+.gaming .rail,.gaming .glass,.gaming .status,.gaming .nickTag{backdrop-filter:none}
+
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}

@@ -33,7 +33,7 @@ async function getJson(url) {
   return r.json();
 }
 
-const getSettings = () => Object.assign({ nick: 'Player', ramGb: 4 }, readJson(SETTINGS, {}));
+const getSettings = () => Object.assign({ nick: 'Player', ramGb: 4, minimize: true }, readJson(SETTINGS, {}));
 const instanceDir = (name) => path.join(INSTANCES, safeName(name));
 
 let manifestCache = null;
@@ -379,7 +379,9 @@ async function launch(name, report, log) {
       authorization: Authenticator.getAuth(settings.nick),
       root: SHARED,
       version: { number: inst.mc, type: 'release', custom },
-      memory: { max: `${inst.ramGb || settings.ramGb}G`, min: '1G' },
+      // вся память сразу и настройки сборщика мусора как у официального лаунчера: без них игра подвисает на очистке памяти
+      memory: { max: `${inst.ramGb || settings.ramGb}G`, min: `${inst.ramGb || settings.ramGb}G` },
+      customArgs: ['-XX:+UnlockExperimentalVMOptions', '-XX:+UseG1GC', '-XX:G1NewSizePercent=20', '-XX:G1ReservePercent=20', '-XX:MaxGCPauseMillis=50', '-XX:G1HeapRegionSize=32M'],
       javaPath,
       overrides: { gameDirectory: dir }
     });
@@ -414,7 +416,8 @@ handle('settings:get', () => getSettings());
 handle('settings:set', (_e, patch) => {
   const s = Object.assign(getSettings(), {
     nick: String(patch.nick || '').trim(),
-    ramGb: Math.min(32, Math.max(1, Math.round(Number(patch.ramGb) || 4)))
+    ramGb: Math.min(32, Math.max(1, Math.round(Number(patch.ramGb) || 4))),
+    minimize: patch.minimize !== false
   });
   if (!validNick(s.nick)) throw new Error('Ник: 3–16 латинских букв, цифр или _');
   writeJson(SETTINGS, s);
@@ -471,7 +474,14 @@ handle('skin:pick', async (event) => {
 handle('skin:reset', () => { fs.rmSync(SKIN, { force: true }); return null; });
 handle('game:launch', (event, name) => {
   const send = (ch, v) => { if (!event.sender.isDestroyed()) event.sender.send(ch, v); };
-  return launch(name, (p) => send('progress', p), (line) => send('log', line));
+  const win = BrowserWindow.fromWebContents(event.sender);
+  return launch(name, (p) => {
+    send('progress', p);
+    // лаунчер прячется, пока идёт игра, чтобы не отнимать у неё видеокарту
+    if (!win || win.isDestroyed() || !getSettings().minimize) return;
+    if (p.stage === 'running') win.minimize();
+    if (p.stage === 'closed' && win.isMinimized()) win.restore();
+  }, (line) => send('log', line));
 });
 handle('game:stop', () => { if (running && running.proc) running.proc.kill(); return !!running; });
 

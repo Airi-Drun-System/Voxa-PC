@@ -157,11 +157,12 @@ function showProgress(p) {
   showStatus(p.text + (pct !== null && pct < 100 ? ` · ${pct}%` : ''), pct, p.error);
   if (p.error) toast(p.text, true);
   $('playFill').style.width = pct === null || p.stage === 'running' ? '0' : `${pct}%`;
-  if (p.stage === 'running') { game = 'running'; setLogState(); skinMood('wave'); hideStatus(3000); }
+  if (p.stage === 'running') { game = 'running'; setLogState(); hideStatus(3000); setGaming(true); }
   if (p.stage === 'closed' || p.stage === 'error') {
     game = 'idle';
     runningName = null;
     setLogState();
+    setGaming(false);
     skinMood('idle');
     loadInstances();
     hideStatus(p.error ? 9000 : 4000);
@@ -276,6 +277,12 @@ function skinMood(mood) {
   if (mood === 'walk') { viewer.animation = new skinview3d.WalkingAnimation(); viewer.animation.speed = 1.2; }
   else if (mood === 'wave') { viewer.animation = new skinview3d.WaveAnimation(); setTimeout(() => { if (game !== 'starting') skinMood('idle'); }, 2600); }
   else viewer.animation = new skinview3d.IdleAnimation();
+}
+
+// пока идёт игра, 3D-скин не рисуется и анимации стоят
+function setGaming(on) {
+  document.body.classList.toggle('gaming', on);
+  if (viewer) viewer.renderPaused = on;
 }
 
 function drawFlat(img) {
@@ -651,7 +658,7 @@ document.querySelectorAll('.rail [data-tab]').forEach((b) => b.addEventListener(
 
 $('setRam').addEventListener('input', () => { $('ramVal').textContent = $('setRam').value; });
 $('saveSettings').addEventListener('click', () => busyBtn($('saveSettings'), 'Сохраняю…', async () => {
-  const s = await call('settings:set', { nick: $('setNick').value, ramGb: $('setRam').value });
+  const s = await call('settings:set', { nick: $('setNick').value, ramGb: $('setRam').value, minimize: $('setMin').checked });
   $('nick').textContent = s.nick;
   globalRam = s.ramGb;
   toast('Настройки сохранены');
@@ -665,6 +672,7 @@ $('saveSettings').addEventListener('click', () => busyBtn($('saveSettings'), 'С
   $('setNick').value = s.nick;
   $('setRam').value = s.ramGb;
   $('ramVal').textContent = s.ramGb;
+  $('setMin').checked = s.minimize !== false;
   initViewer();
   showSkin(await call('skin:get'));
   await loadInstances();
