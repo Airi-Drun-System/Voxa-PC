@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://cdn.modrinth.com">
 <title>Voxa</title>
 <link rel="stylesheet" href="style.css">
 </head>
@@ -82,9 +82,19 @@
     <div class="list" id="list"></div>
   </section>
 
-  <section id="mods" class="view pad">
-    <h2>Моды</h2>
-    <p class="soon">Поиск и установка модов с Modrinth появятся в следующей сборке.</p>
+  <!-- Моды: поиск и установка с Modrinth -->
+  <section id="mods" class="view">
+    <div class="listHead">
+      <div class="seg" role="radiogroup" aria-label="Что искать">
+        <label><input type="radio" name="kind" value="mod" checked><span>Моды</span></label>
+        <label><input type="radio" name="kind" value="modpack"><span>Сборки</span></label>
+        <label><input type="radio" name="kind" value="installed"><span>Установленные</span></label>
+      </div>
+      <select id="modInst" aria-label="Сборка для модов"></select>
+      <input id="modSearch" placeholder="Поиск на Modrinth" spellcheck="false">
+    </div>
+    <p class="msg modMsg" id="modMsg"></p>
+    <div class="list modList" id="modList"></div>
   </section>
 
   <section id="settings" class="view pad">

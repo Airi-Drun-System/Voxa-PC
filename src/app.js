@@ -90,7 +90,7 @@ function renderList() {
 $('search').addEventListener('input', renderList);
 $('newBtn').addEventListener('click', openNew);
 
-function render() { renderPicker(); renderList(); }
+function render() { renderPicker(); renderList(); renderModInst(); }
 
 async function loadInstances() {
   instances = await call('instances:list');
@@ -100,6 +100,7 @@ async function loadInstances() {
 
 // ---------- запуск: прогресс прямо в кнопке ----------
 function showProgress(p) {
+  if (p.stage === 'pack') { $('modMsg').textContent = p.text; return; }
   const btn = $('playBtn');
   const pct = typeof p.progress === 'number' ? p.progress : null;
   btn.classList.toggle('err', !!p.error);
@@ -132,6 +133,104 @@ async function launch() {
 }
 $('playBtn').addEventListener('click', launch);
 
+// ---------- моды и сборки с Modrinth ----------
+const kind = () => document.querySelector('input[name=kind]:checked').value;
+const modInst = () => instances.find((i) => i.name === $('modInst').value);
+const fmtNum = (n) => (n >= 1e6 ? (n / 1e6).toFixed(1) + ' млн' : n >= 1e3 ? Math.round(n / 1e3) + ' тыс' : String(n));
+let modTimer = 0;
+let modSeq = 0;
+
+function renderModInst() {
+  const keep = $('modInst').value;
+  const fabric = instances.filter((i) => i.loader === 'fabric');
+  $('modInst').textContent = '';
+  for (const i of fabric) { const o = document.createElement('option'); o.value = o.textContent = i.name; $('modInst').appendChild(o); }
+  $('modInst').value = fabric.some((i) => i.name === keep) ? keep : (fabric.some((i) => i.name === selected) ? selected : (fabric[0] || {}).name || '');
+}
+
+function modRow(icon, title, sub, btnText, onClick, danger) {
+  const row = document.createElement('div');
+  row.className = 'row';
+  row.innerHTML = '<img class="tile" alt=""><span class="info"><b></b><small></small></span><span class="acts"><button></button></span>';
+  const img = row.querySelector('img');
+  if (icon) img.src = icon;
+  else { const t = document.createElement('i'); t.className = 'tile'; paint(t, title); img.replaceWith(t); }
+  row.querySelector('b').textContent = title;
+  row.querySelector('small').textContent = sub;
+  const b = row.querySelector('button');
+  b.textContent = btnText;
+  b.className = danger ? 'danger' : 'go';
+  if (onClick) b.addEventListener('click', () => onClick(b)); else b.disabled = true;
+  return row;
+}
+
+async function withBusyButton(b, text, fn) {
+  const all = document.querySelectorAll('#modList button');
+  all.forEach((x) => { x.disabled = true; });
+  b.textContent = text;
+  $('modMsg').classList.remove('err');
+  try { await fn(); } catch (e) { $('modMsg').textContent = e.message; $('modMsg').classList.add('err'); }
+  await loadInstances();
+  searchMods();
+}
+
+async function searchMods() {
+  const k = kind();
+  const inst = modInst();
+  const seq = ++modSeq;
+  const box = $('modList');
+  $('modInst').hidden = k === 'modpack';
+  $('modSearch').hidden = k === 'installed';
+  if (k !== 'modpack' && !inst) {
+    box.innerHTML = '<p class="empty">Моды ставятся в сборку на Fabric. Создай её во вкладке «Сборки».</p>';
+    return;
+  }
+  if (k === 'installed') {
+    box.textContent = '';
+    const mods = Object.entries(inst.mods || {});
+    if (!mods.length) box.innerHTML = '<p class="empty">В этой сборке пока нет модов, поставленных через Voxa.</p>';
+    for (const [id, m] of mods) {
+      box.appendChild(modRow(null, m.title, m.file, 'Удалить', (b) => withBusyButton(b, 'Удаляю…', async () => {
+        await call('mods:remove', inst.name, id);
+        $('modMsg').textContent = `Удалён: ${m.title}`;
+      }), true));
+    }
+    return;
+  }
+  box.innerHTML = '<p class="empty">Ищу…</p>';
+  let hits;
+  try {
+    hits = await call('mods:search', { query: $('modSearch').value.trim(), kind: k, mc: inst && inst.mc });
+  } catch (e) {
+    if (seq !== modSeq) return;
+    box.innerHTML = '<p class="empty"></p>';
+    box.firstChild.textContent = 'Нет связи с Modrinth: ' + e.message;
+    return;
+  }
+  if (seq !== modSeq) return; // пришёл ответ на старый запрос
+  box.textContent = '';
+  if (!hits.length) box.innerHTML = '<p class="empty">Ничего не нашлось</p>';
+  for (const h of hits) {
+    const sub = `${h.author} · ${fmtNum(h.downloads)} скачиваний · ${h.desc}`;
+    if (k === 'modpack') {
+      box.appendChild(modRow(h.icon, h.title, sub, 'Установить сборку', (b) => withBusyButton(b, 'Ставлю…', async () => {
+        const created = await call('packs:install', h.id, h.title);
+        selected = created.name;
+        $('modMsg').textContent = `Сборка «${created.name}» готова. Жми ИГРАТЬ.`;
+      })));
+    } else {
+      const has = inst.mods && inst.mods[h.id];
+      box.appendChild(modRow(h.icon, h.title, sub, has ? 'Установлен' : 'Установить', has ? null : (b) => withBusyButton(b, 'Ставлю…', async () => {
+        await call('mods:install', inst.name, h.id, h.title);
+        $('modMsg').textContent = `Установлен: ${h.title}`;
+      })));
+    }
+  }
+}
+$('modSearch').addEventListener('input', () => { clearTimeout(modTimer); modTimer = setTimeout(searchMods, 350); });
+$('modInst').addEventListener('change', searchMods);
+document.querySelectorAll('input[name=kind]').forEach((r) => r.addEventListener('change', () => { $('modMsg').textContent = ''; searchMods(); }));
+
 // ---------- новая сборка ----------
 let versionsLoaded = false;
 async function openNew() {
@@ -146,7 +245,7 @@ async function openNew() {
     for (const v of list) { const o = document.createElement('option'); o.value = o.textContent = v; $('newVer').appendChild(o); }
     versionsLoaded = true;
   } catch (e) {
-    $('newMsg').textContent = 'Нет связи с серверами Mojang: ' + e.message;
+    $('newMsg').textContent = 'Не загрузился список версий. ' + e.message;
     $('newMsg').classList.add('err');
   }
 }
@@ -180,7 +279,10 @@ function showTab(name) {
   // пункт игры в боковой панели подсвечен на всех её вкладках
   document.querySelector('.game').classList.toggle('on', name !== 'settings');
 }
-document.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
+document.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => {
+  showTab(b.dataset.tab);
+  if (b.dataset.tab === 'mods' && !$('modList').childElementCount) searchMods();
+}));
 $('accBtn').addEventListener('click', () => { showTab('settings'); $('setNick').focus(); });
 
 const setNick = (n) => { $('nick').textContent = n; $('nick2').textContent = n; };

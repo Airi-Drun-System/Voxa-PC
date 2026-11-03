@@ -97,6 +97,14 @@ h2{font-size:24px;margin-bottom:18px}
 .acts .danger{color:var(--danger)}
 .empty{color:var(--dim);padding:30px 12px}
 
+.listHead .seg{margin:0;flex:none}
+.listHead .seg span{padding:9px 14px}
+.modMsg{padding:0 28px;margin:0 0 6px}
+.modList .acts{opacity:1}
+.modList img.tile{object-fit:cover;background:#2c3037}
+.modList .info small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.acts button:disabled{opacity:.55;cursor:default}
+
 /* ---------- формы ---------- */
 .field{display:flex;flex-direction:column;gap:6px;margin-bottom:18px;max-width:420px;font-weight:600}
 .field small{color:var(--dim);font-weight:400}
