@@ -1,0 +1,92 @@
+:root{--bg:#0f1218;--rail:rgba(10,12,16,.78);--ink:#eef2f7;--dim:#9aa6b6;--play:#5ee07a;--play-ink:#06210d;--accent:#3fe0bf;--danger:#ff6b6b;--ease:cubic-bezier(.23,1,.32,1)}
+*{box-sizing:border-box;margin:0}
+[hidden]{display:none!important}
+html,body{height:100%}
+body{background:var(--bg);color:var(--ink);font:15px/1.4 "Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;display:flex;overflow:hidden;user-select:none}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer;border:0;background:none}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+
+/* размытый «пейзаж» за витриной, цвет берётся у выбранной сборки */
+.bg{position:fixed;inset:-10%;z-index:-1;filter:blur(40px) saturate(1.2);opacity:.55;transition:background .6s var(--ease);
+  background:radial-gradient(55% 70% at 70% 35%,var(--c1,#2f7d4a),transparent 70%),radial-gradient(45% 60% at 15% 100%,var(--c2,#1d3f22),transparent 70%),linear-gradient(#123,#0f1218)}
+
+.rail{width:76px;flex:none;background:var(--rail);display:flex;flex-direction:column;align-items:center;gap:10px;padding:16px 0}
+.rail .logo svg{width:44px;height:44px}
+.rail .logo{margin-bottom:14px}
+.rail button{width:50px;height:50px;border-radius:15px;display:grid;place-items:center;color:var(--dim);transition:background .2s,color .2s}
+.rail button:hover{background:rgba(255,255,255,.07);color:var(--ink)}
+.rail button.on{background:#fff;color:var(--bg)}
+.rail svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linejoin:round;stroke-linecap:round}
+.rail .grow{flex:1}
+
+main{flex:1;position:relative;min-width:0}
+.view{position:absolute;inset:0;padding:28px 36px 30px;display:none;flex-direction:column}
+.view.on{display:flex;animation:in .35s var(--ease)}
+@keyframes in{from{opacity:0;transform:translateY(10px)}}
+h1{font-size:38px;font-weight:800;letter-spacing:-.02em;margin:18px 0 18px}
+
+.acc{display:flex;align-items:center;gap:12px;cursor:pointer;align-self:flex-start;padding:6px 10px 6px 6px;border-radius:16px}
+.acc:hover{background:rgba(255,255,255,.06)}
+.acc .face{width:44px;height:44px;border-radius:11px;background:#e8b48a;box-shadow:inset 0 -18px 0 #3a5ba0;position:relative}
+.acc .face::before,.acc .face::after{content:"";position:absolute;top:14px;width:7px;height:7px;background:#1b1b24}
+.acc .face::before{left:10px}.acc .face::after{right:10px}
+.acc b{display:block;font-size:16px}.acc small{color:var(--dim)}
+
+.row{display:flex;gap:18px;overflow-x:auto;padding:6px 6px 16px;scroll-snap-type:x mandatory;scrollbar-width:thin}
+.card{flex:0 0 230px;height:200px;border-radius:24px;padding:16px;display:flex;flex-direction:column;justify-content:flex-end;position:relative;cursor:pointer;scroll-snap-align:start;
+  background:linear-gradient(160deg,var(--c1),var(--c2));box-shadow:inset 0 0 0 1px rgba(255,255,255,.12);transition:flex-basis .3s var(--ease),transform .15s var(--ease),box-shadow .2s}
+.card:hover{transform:translateY(-3px)}
+.card.on{flex-basis:300px;box-shadow:inset 0 0 0 3px #fff}
+.card b{font-size:21px;font-weight:800;line-height:1.1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.card small{opacity:.85}
+.tag{position:absolute;top:14px;left:14px;background:rgba(0,0,0,.45);padding:3px 10px;border-radius:99px;font-size:12px}
+.card.add{background:none;box-shadow:inset 0 0 0 2px rgba(255,255,255,.22);align-items:center;justify-content:center;flex-basis:170px;gap:6px;color:var(--dim)}
+.card.add:hover{color:var(--ink);box-shadow:inset 0 0 0 2px rgba(255,255,255,.5)}
+.card.add span{font-size:44px;line-height:1}
+
+.meta{display:flex;gap:28px;margin-top:auto;color:var(--dim);font-size:13px}
+.meta b{display:block;color:var(--ink);font-size:20px}
+.actions{position:absolute;left:36px;bottom:112px;display:flex;gap:10px}
+.actions button{padding:7px 14px;border-radius:99px;background:rgba(255,255,255,.08);font-size:13px}
+.actions button:hover{background:rgba(255,255,255,.16)}
+.actions .danger{color:var(--danger)}
+
+.play{position:absolute;right:36px;bottom:30px;height:74px;padding:0 44px 0 36px;border-radius:99px;background:var(--play);color:var(--play-ink);font-size:28px;font-weight:800;display:flex;align-items:center;gap:14px;
+  box-shadow:0 12px 34px rgba(94,224,122,.35);transition:transform .15s var(--ease),opacity .2s}
+.play svg{width:28px;height:28px;fill:currentColor}
+.play:hover{transform:translateY(-2px)}
+.play:active{transform:scale(.97)}
+.play:disabled{opacity:.45;cursor:default;transform:none}
+
+.status{position:fixed;left:112px;right:330px;bottom:34px;background:rgba(10,12,16,.85);border-radius:16px;padding:12px 16px;font-size:13px}
+.status .bar{height:6px;border-radius:3px;background:rgba(255,255,255,.12);margin-top:8px;overflow:hidden}
+.status .bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .2s}
+.status .bar.indet i{width:30%;animation:indet 1.1s ease-in-out infinite}
+@keyframes indet{from{transform:translateX(-100%)}to{transform:translateX(340%)}}
+.status.err{color:var(--danger)}
+
+.field{display:flex;flex-direction:column;gap:6px;margin-bottom:18px;max-width:420px;font-weight:600}
+.field small{color:var(--dim);font-weight:400}
+input:not([type=range]):not([type=radio]),select{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14);border-radius:12px;padding:10px 12px}
+select option{background:#1a1e26}
+input[type=range]{accent-color:var(--accent)}
+.primary{background:var(--accent);color:#04211b;font-weight:800;padding:10px 22px;border-radius:99px;align-self:flex-start}
+.msg{min-height:20px;margin-top:10px;color:var(--dim)}
+.msg.err{color:var(--danger)}
+.soon{color:var(--dim)}
+
+dialog{margin:auto;background:#161a22;color:var(--ink);border:0;border-radius:24px;padding:26px;width:420px;box-shadow:0 30px 80px rgba(0,0,0,.6)}
+dialog::backdrop{background:rgba(5,6,10,.6);backdrop-filter:blur(4px)}
+dialog h2{font-size:22px;margin-bottom:18px}
+dialog .field{max-width:none}
+.seg{display:flex;gap:8px;margin-bottom:8px}
+.seg label{flex:1}
+.seg input{position:absolute;opacity:0}
+.seg span{display:block;text-align:center;padding:10px;border-radius:12px;background:rgba(255,255,255,.08);cursor:pointer}
+.seg input:checked+span{background:#fff;color:var(--bg);font-weight:700}
+.seg input:focus-visible+span{outline:2px solid var(--accent)}
+.btns{display:flex;justify-content:flex-end;gap:10px;margin-top:14px}
+.btns button{padding:10px 18px;border-radius:99px}
+
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}

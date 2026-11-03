@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
+<title>Voxa</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="bg"></div>
+
+<nav class="rail">
+  <div class="logo" title="Voxa"><svg viewBox="0 0 108 108"><path d="M54 27.7 77 40.6 54 53.5 31 40.6Z" fill="#B9FFF0"/><path d="M31 40.6 54 53.5v26.7L31 67.3Z" fill="#3FE0BF"/><path d="M77 40.6 54 53.5v26.7l23-12.9Z" fill="#14A88F"/></svg></div>
+  <button class="on" data-view="home" title="Главная"><svg viewBox="0 0 24 24"><path d="M4 11 12 4l8 7v9H4z"/></svg></button>
+  <button data-view="mods" title="Моды (скоро)"><svg viewBox="0 0 24 24"><path d="M9 3h6v4h4v6h-4v8H9v-8H5V7h4z"/></svg></button>
+  <span class="grow"></span>
+  <button data-view="settings" title="Настройки"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3M5 5l2 2m10 10 2 2M5 19l2-2M17 7l2-2"/></svg></button>
+</nav>
+
+<main>
+  <section id="home" class="view on">
+    <header class="acc" id="accBtn" title="Сменить ник">
+      <div class="face" id="face"></div>
+      <div><b id="nick">Player</b><small>офлайн-профиль</small></div>
+    </header>
+    <h1>Твои сборки</h1>
+    <div class="row" id="cards"></div>
+    <div class="meta" id="meta"></div>
+    <div class="actions" id="cardActions" hidden>
+      <button id="openDir">Папка сборки</button>
+      <button id="delInst" class="danger">Удалить</button>
+    </div>
+    <button class="play" id="play" disabled><svg viewBox="0 0 24 24"><path d="M7 4v16l13-8z"/></svg>Играть</button>
+  </section>
+
+  <section id="mods" class="view">
+    <h1>Моды</h1>
+    <p class="soon">Поиск и установка модов с Modrinth появятся в следующей сборке.</p>
+  </section>
+
+  <section id="settings" class="view">
+    <h1>Настройки</h1>
+    <label class="field">Ник в игре
+      <input id="setNick" maxlength="16" spellcheck="false" placeholder="Player">
+      <small>3–16 символов: латиница, цифры, _</small>
+    </label>
+    <label class="field">Память для игры: <b id="ramVal">4</b> ГБ
+      <input id="setRam" type="range" min="1" max="16" step="1" value="4">
+    </label>
+    <button class="primary" id="saveSettings">Сохранить</button>
+    <p class="msg" id="setMsg"></p>
+  </section>
+</main>
+
+<div class="status" id="status" hidden>
+  <span id="statusText"></span>
+  <div class="bar"><i id="statusBar"></i></div>
+</div>
+
+<dialog id="newDlg">
+  <form method="dialog" id="newForm">
+    <h2>Новая сборка</h2>
+    <label class="field">Название<input id="newName" maxlength="40" placeholder="Выживание" required></label>
+    <label class="field">Версия Minecraft<select id="newVer"></select></label>
+    <div class="seg" role="radiogroup" aria-label="Загрузчик">
+      <label><input type="radio" name="loader" value="vanilla" checked><span>Без модов</span></label>
+      <label><input type="radio" name="loader" value="fabric"><span>Fabric</span></label>
+    </div>
+    <p class="msg" id="newMsg"></p>
+    <div class="btns"><button value="cancel" formnovalidate>Отмена</button><button class="primary" id="newOk" value="ok">Создать</button></div>
+  </form>
+</dialog>
+
+<script src="app.js"></script>
+</body>
+</html>

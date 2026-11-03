@@ -1,0 +1,30 @@
+{
+  "name": "voxa",
+  "productName": "Voxa",
+  "version": "0.1.0",
+  "description": "Лаунчер Minecraft для ПК от VegasDev",
+  "author": "VegasDev",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node test/util.test.js",
+    "dist": "electron-builder --win nsis portable --publish never"
+  },
+  "dependencies": {
+    "adm-zip": "0.5.16",
+    "minecraft-launcher-core": "3.18.2"
+  },
+  "devDependencies": {
+    "electron": "33.2.1",
+    "electron-builder": "25.1.8"
+  },
+  "build": {
+    "appId": "com.vegasdev.voxa.pc",
+    "productName": "Voxa",
+    "icon": "build/icon.png",
+    "files": ["main.js", "preload.js", "lib/**", "src/**", "package.json"],
+    "win": { "artifactName": "Voxa-${version}-${arch}-${target}.${ext}" },
+    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true },
+    "portable": { "artifactName": "Voxa-${version}-portable.exe" }
+  }
+}
