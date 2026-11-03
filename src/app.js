@@ -653,7 +653,34 @@ function openTab(name) {
   $('railDot').style.top = document.querySelector(`.rail [data-tab=${name}]`).offsetTop + 'px';
   if (name === 'inst') renderInst();
   if (name === 'catalog') searchCatalog();
+  if (name === 'horizon') renderHorizon();
 }
+
+// ==================== Horizon ====================
+async function renderHorizon() {
+  const st = await call('horizon:status');
+  const el = $('hzState');
+  el.classList.toggle('off', !st.installed);
+  if (!st.supported) { el.textContent = 'Пока доступно только на Windows'; $('hzPlay').disabled = $('hzUpdate').disabled = true; return; }
+  el.textContent = st.installed ? `Установлен лаунчер ${String(st.tag || '').replace(/^launcher[-@]v?/, 'v')}` : 'Не установлен';
+  $('hzPlay').textContent = st.installed ? 'Запустить Horizon' : 'Установить и запустить';
+  $('hzUpdate').hidden = !st.installed;
+}
+$('hzPlay').addEventListener('click', () => busyBtn($('hzPlay'), 'Подожди…', async () => {
+  const st = await call('horizon:status');
+  if (!st.installed) { await call('horizon:install'); hideStatus(1500); toast('Horizon установлен'); }
+  await call('horizon:launch');
+  toast('Запускаю Horizon: дальше всё в его окне');
+  renderHorizon();
+}));
+$('hzUpdate').addEventListener('click', () => busyBtn($('hzUpdate'), 'Обновляю…', async () => {
+  const st = await call('horizon:install');
+  hideStatus(1500);
+  toast(`Horizon обновлён до ${String(st.tag || '').replace(/^launcher[-@]v?/, 'v')}`);
+  renderHorizon();
+}));
+$('hzDir').addEventListener('click', () => call('horizon:open'));
+$('hzPage').addEventListener('click', () => call('horizon:page'));
 document.querySelectorAll('.rail [data-tab]').forEach((b) => b.addEventListener('click', () => (b.dataset.tab === 'inst' ? openInst() : openTab(b.dataset.tab))));
 
 $('setRam').addEventListener('input', () => { $('ramVal').textContent = $('setRam').value; });

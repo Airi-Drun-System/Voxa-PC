@@ -14,6 +14,7 @@
   <button class="ic on" data-tab="home" title="Главная"><svg viewBox="0 0 24 24"><path d="M3 11l9-7 9 7v9H3z"/></svg></button>
   <button class="ic" data-tab="inst" title="Сборка"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg></button>
   <button class="ic" data-tab="catalog" title="Каталог Modrinth"><svg viewBox="0 0 24 24"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/></svg></button>
+  <button class="ic" data-tab="horizon" title="Horizon — Minecraft на Rust"><svg viewBox="0 0 24 24"><path d="M3 15h18M6 15a6 6 0 0 1 12 0M12 5v2M5.6 7.6l1.4 1.4M18.4 7.6 17 9M4 19h16"/></svg></button>
   <button class="ic" data-tab="settings" title="Настройки"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3M5 5l2 2m10 10 2 2M5 19l2-2M17 7l2-2"/></svg></button>
   <button class="face" id="railFace" title="Скин и ник"><canvas id="faceCv" width="8" height="8"></canvas></button>
 </nav>
@@ -132,6 +133,29 @@
   </div>
   <div class="list" id="catList"></div>
   <button class="ghostBtn more" id="catMore" hidden>Показать ещё</button>
+</main>
+
+<!-- ============ Horizon: отдельный режим ============ -->
+<main id="horizon" class="view page">
+  <div class="hzHero">
+    <span class="badge">Отдельный режим</span>
+    <h2>Horizon</h2>
+    <p class="hzSub">Minecraft Java 26.3, заново написанный на Rust. Мир грузится в разы быстрее и ест меньше памяти. Работает через свой лаунчер, Voxa его ставит и запускает.</p>
+    <p class="hzState" id="hzState">Проверяю…</p>
+    <div class="hzBtns">
+      <button class="primary" id="hzPlay">Установить и запустить</button>
+      <button class="ghostBtn" id="hzUpdate">Обновить</button>
+      <button class="ghostBtn" id="hzDir">Папка</button>
+      <button class="ghostBtn" id="hzPage">Страница проекта</button>
+    </div>
+  </div>
+  <ul class="hzNotes">
+    <li><b>Неофициальный проект</b> энтузиастов, не от Mojang. Voxa скачивает его только с GitHub автора и сверяет контрольную сумму.</li>
+    <li><b>Нужна своя копия Minecraft Java Edition:</b> при первом запуске Horizon готовит игру из версии 26.3. Если её нет, он предложит скачать.</li>
+    <li><b>Моды Fabric и шейдеры тут не работают.</b> У Horizon свои моды, они ставятся внутри его лаунчера.</li>
+    <li><b>Вход Microsoft пока не поддерживается:</b> одиночная игра, LAN и сервера без проверки аккаунта.</li>
+    <li><b>Нужна видеокарта с Vulkan</b>, любая современная подойдёт.</li>
+  </ul>
 </main>
 
 <!-- ============ Настройки ============ -->

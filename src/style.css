@@ -195,6 +195,16 @@ h2{font:800 30px Unbounded;margin-bottom:18px}
 .danger small{color:var(--dim);grid-column:1}
 .danger button{grid-row:1/3;grid-column:2}
 
+/* Horizon */
+.hzHero{position:relative;overflow:hidden;border-radius:24px;padding:30px;margin-bottom:18px;background:radial-gradient(120% 140% at 100% 0,rgba(255,138,107,.28),transparent 55%),radial-gradient(90% 120% at 0 100%,rgba(63,224,191,.16),transparent 60%),var(--panel);border:1px solid var(--edge);animation:rise .6s var(--ease) both}
+.hzHero h2{font-size:44px;margin:10px 0 8px}
+.hzSub{color:#C3D8D6;max-width:560px;font-size:16px}
+.hzState{margin:16px 0 14px;font-weight:700;color:var(--mint)}
+.hzState.off{color:var(--dim)}
+.hzBtns{display:flex;gap:8px;flex-wrap:wrap}
+.hzNotes{display:flex;flex-direction:column;gap:10px;padding-left:20px;color:var(--dim);max-width:720px}
+.hzNotes b{color:var(--ink)}
+
 /* формы */
 .field{display:flex;flex-direction:column;gap:6px;margin-bottom:20px;max-width:460px;font-weight:700}
 .field small{color:var(--dim);font-weight:500}

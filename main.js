@@ -1,5 +1,6 @@
 'use strict';
 const { app, BrowserWindow, ipcMain, shell, net, session, dialog } = require('electron');
+const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const { Client, Authenticator } = require('minecraft-launcher-core');
@@ -394,6 +395,74 @@ async function launch(name, report, log) {
   }
 }
 
+// ---------- Horizon: Minecraft 26.3 на Rust, отдельный режим ----------
+// Ставим официальный лаунчер Horizon с GitHub автора, дальше он сам ставит игру и обновляется.
+const HORIZON_DIR = path.join(ROOT, 'horizon');
+const HZ_RELEASES = 'https://api.github.com/repos/ludovic111/horizon/releases?per_page=50';
+const HZ_ASSET = 'horizon-launcher-windows-x64.zip';
+const HZ_PAGE = 'https://github.com/ludovic111/horizon';
+function findExe(dir, name, depth = 3) {
+  if (!fs.existsSync(dir)) return null;
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const p = path.join(dir, e.name);
+    if (e.isFile() && e.name.toLowerCase() === name) return p;
+    if (e.isDirectory() && depth > 0) { const f = findExe(p, name, depth - 1); if (f) return f; }
+  }
+  return null;
+}
+const horizonExe = () => findExe(path.join(HORIZON_DIR, 'app'), 'horizon-launcher.exe');
+function horizonStatus() {
+  return { supported: process.platform === 'win32', installed: !!horizonExe(), tag: readJson(path.join(HORIZON_DIR, 'meta.json'), {}).tag || null };
+}
+async function horizonLatest() {
+  const rels = await getJson(HZ_RELEASES);
+  const rel = rels.find((r) => !r.draft && /^launcher/.test(r.tag_name) && r.assets.some((a) => a.name === HZ_ASSET));
+  if (!rel) throw new Error('У Horizon сейчас нет сборки лаунчера для Windows');
+  return rel;
+}
+async function horizonInstall(report) {
+  if (process.platform !== 'win32') throw new Error('Horizon в Voxa пока ставится только на Windows');
+  report({ stage: 'pack', text: 'Ищу свежий лаунчер Horizon' });
+  const rel = await horizonLatest();
+  const zipA = rel.assets.find((a) => a.name === HZ_ASSET), sumsA = rel.assets.find((a) => a.name === 'SHA256SUMS');
+  // скачиваем только из релизов автора на GitHub
+  if (!/^https:\/\/github\.com\/ludovic111\/horizon\/releases\/download\//.test(zipA.browser_download_url)) throw new Error('Странная ссылка на файл Horizon');
+  const res = await fetch(zipA.browser_download_url, { headers: HEADERS });
+  if (!res.ok) throw new Error(`Horizon не скачался (${res.status})`);
+  const total = Number(res.headers.get('content-length')) || zipA.size || 0, chunks = [];
+  let got = 0;
+  for await (const c of res.body) { chunks.push(c); got += c.length; report({ stage: 'pack', text: `Скачиваю Horizon ${total ? Math.round(got / total * 100) : ''}%` }); }
+  const buf = Buffer.concat(chunks.map((c) => Buffer.from(c)));
+  if (sumsA) {
+    const sums = await (await fetch(sumsA.browser_download_url, { headers: HEADERS })).text();
+    const line = sums.split(/\r?\n/).find((l) => l.trim().endsWith(HZ_ASSET));
+    const want = line && line.trim().split(/\s+/)[0].toLowerCase();
+    const have = crypto.createHash('sha256').update(buf).digest('hex');
+    if (want && want !== have) throw new Error('Файл Horizon повреждён или подменён: контрольная сумма не совпала');
+  }
+  report({ stage: 'pack', text: 'Распаковываю Horizon' });
+  const tmp = path.join(HORIZON_DIR, 'app-new');
+  fs.rmSync(tmp, { recursive: true, force: true });
+  const zip = new AdmZip(buf);
+  for (const e of zip.getEntries()) { // проверяем пути, как и у сборок Modrinth
+    if (e.isDirectory) continue;
+    const dest = insideDir(tmp, e.entryName);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.writeFileSync(dest, e.getData());
+  }
+  if (!findExe(tmp, 'horizon-launcher.exe')) throw new Error('В архиве Horizon нет horizon-launcher.exe');
+  fs.rmSync(path.join(HORIZON_DIR, 'app'), { recursive: true, force: true });
+  fs.renameSync(tmp, path.join(HORIZON_DIR, 'app'));
+  writeJson(path.join(HORIZON_DIR, 'meta.json'), { tag: rel.tag_name, installed: Date.now() });
+  return horizonStatus();
+}
+function horizonLaunch() {
+  const exe = horizonExe();
+  if (!exe) throw new Error('Horizon ещё не установлен');
+  spawn(exe, [], { cwd: path.dirname(exe), detached: true, stdio: 'ignore' }).unref();
+  return true;
+}
+
 // ---------- окно ----------
 function createWindow() {
   const win = new BrowserWindow({
@@ -472,6 +541,11 @@ handle('skin:pick', async (event) => {
   return skinUrl();
 });
 handle('skin:reset', () => { fs.rmSync(SKIN, { force: true }); return null; });
+handle('horizon:status', () => horizonStatus());
+handle('horizon:install', (event) => horizonInstall((p) => { if (!event.sender.isDestroyed()) event.sender.send('progress', p); }));
+handle('horizon:launch', () => horizonLaunch());
+handle('horizon:open', () => { fs.mkdirSync(HORIZON_DIR, { recursive: true }); return shell.openPath(HORIZON_DIR); });
+handle('horizon:page', () => shell.openExternal(HZ_PAGE));
 handle('game:launch', (event, name) => {
   const send = (ch, v) => { if (!event.sender.isDestroyed()) event.sender.send(ch, v); };
   const win = BrowserWindow.fromWebContents(event.sender);
