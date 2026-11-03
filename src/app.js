@@ -2,6 +2,8 @@
 const $ = (id) => document.getElementById(id);
 const PALETTE = [['#3f8f4a', '#1d3f22'], ['#8a4fd1', '#2d1a52'], ['#d1784f', '#52281a'], ['#4f9ad1', '#1a3552'], ['#c9a23a', '#4a3a10'], ['#d14f7e', '#521a33']];
 const colorsOf = (name) => { let h = 2166136261; for (const ch of name) h = Math.imul(h ^ ch.codePointAt(0), 16777619); return PALETTE[(h >>> 0) % PALETTE.length]; };
+const paint = (el, name) => { const [c1, c2] = colorsOf(name); el.style.setProperty('--c1', c1); el.style.setProperty('--c2', c2); };
+const loaderName = (i) => (i.loader === 'fabric' ? 'Fabric' : 'Без модов');
 
 async function call(channel, ...args) {
   const r = await window.voxa.call(channel, ...args);
@@ -13,41 +15,6 @@ let instances = [];
 let selected = null;
 let busy = false;
 
-// ---------- витрина ----------
-function render() {
-  const row = $('cards');
-  row.textContent = '';
-  for (const inst of instances) {
-    const [c1, c2] = colorsOf(inst.name);
-    const card = document.createElement('div');
-    card.className = 'card' + (inst.name === selected ? ' on' : '');
-    card.style.setProperty('--c1', c1);
-    card.style.setProperty('--c2', c2);
-    card.tabIndex = 0;
-    card.innerHTML = '<span class="tag"></span><b></b><small></small>';
-    card.querySelector('.tag').textContent = inst.loader === 'fabric' ? 'Fabric' : 'Без модов';
-    card.querySelector('b').textContent = inst.name;
-    card.querySelector('small').textContent = inst.mc + (inst.lastPlayed ? ' · ' + ago(inst.lastPlayed) : '');
-    const pick = () => { selected = inst.name; render(); };
-    card.addEventListener('click', pick);
-    card.addEventListener('keydown', (e) => { if (e.key === 'Enter') pick(); });
-    row.appendChild(card);
-  }
-  const add = document.createElement('button');
-  add.className = 'card add';
-  add.innerHTML = '<span>+</span>Новая сборка';
-  add.addEventListener('click', openNew);
-  row.appendChild(add);
-
-  const cur = instances.find((i) => i.name === selected);
-  const [c1, c2] = cur ? colorsOf(cur.name) : ['#2f7d4a', '#1d3f22'];
-  document.querySelector('.bg').style.setProperty('--c1', c1);
-  document.querySelector('.bg').style.setProperty('--c2', c2);
-  $('play').disabled = !cur || busy;
-  $('cardActions').hidden = !cur;
-  $('meta').innerHTML = cur ? `<div><b>${cur.mc}</b>версия</div><div><b>${cur.loader === 'fabric' ? 'Fabric' : 'Vanilla'}</b>загрузчик</div>` : '';
-}
-
 function ago(ts) {
   const m = Math.round((Date.now() - ts) / 60000);
   if (m < 60) return m <= 1 ? 'только что' : `${m} мин назад`;
@@ -56,46 +23,114 @@ function ago(ts) {
   return `${Math.round(h / 24)} дн назад`;
 }
 
+function tileRow(inst, tag) {
+  const el = document.createElement(tag);
+  el.innerHTML = '<i class="tile"></i><span class="info"><b></b><small></small></span>';
+  paint(el.querySelector('.tile'), inst.name);
+  el.querySelector('b').textContent = inst.name;
+  el.querySelector('small').textContent = `${inst.mc} · ${loaderName(inst)}` + (inst.lastPlayed ? ' · ' + ago(inst.lastPlayed) : '');
+  return el;
+}
+
+// ---------- выбор сборки внизу ----------
+function renderPicker() {
+  const cur = instances.find((i) => i.name === selected);
+  $('pickName').textContent = cur ? cur.name : 'Нет сборок';
+  $('pickVer').textContent = cur ? `${cur.mc} · ${loaderName(cur)}` : 'создай первую';
+  paint($('pickTile'), cur ? cur.name : '');
+  $('playBtn').disabled = !cur || busy;
+
+  const list = $('pickList');
+  list.textContent = '';
+  for (const inst of instances) {
+    const b = tileRow(inst, 'button');
+    b.setAttribute('role', 'option');
+    b.classList.toggle('on', inst.name === selected);
+    b.addEventListener('click', () => { selected = inst.name; list.hidden = true; render(); });
+    list.appendChild(b);
+  }
+  const add = document.createElement('button');
+  add.innerHTML = '<i class="tile" style="--c1:#3a3f47;--c2:#2a2e35"></i><span class="info"><b>+ Новая сборка</b></span>';
+  add.addEventListener('click', () => { list.hidden = true; openNew(); });
+  list.appendChild(add);
+}
+$('pickBtn').addEventListener('click', (e) => { e.stopPropagation(); $('pickList').hidden = !$('pickList').hidden; });
+document.addEventListener('click', (e) => { if (!$('pickList').contains(e.target)) $('pickList').hidden = true; });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') $('pickList').hidden = true; });
+
+// ---------- вкладка «Сборки» ----------
+function renderList() {
+  const q = $('search').value.trim().toLowerCase();
+  const box = $('list');
+  box.textContent = '';
+  const shown = instances.filter((i) => i.name.toLowerCase().includes(q) || i.mc.includes(q));
+  if (!shown.length) {
+    box.innerHTML = `<p class="empty">${instances.length ? 'Ничего не нашлось' : 'Пока ни одной сборки. Нажми «+ Новая сборка».'}</p>`;
+    return;
+  }
+  for (const inst of shown) {
+    const row = tileRow(inst, 'div');
+    row.className = 'row';
+    const acts = document.createElement('span');
+    acts.className = 'acts';
+    acts.innerHTML = '<button class="go">Играть</button><button>Папка</button><button class="danger">Удалить</button>';
+    const [go, dir, del] = acts.children;
+    go.disabled = busy;
+    go.addEventListener('click', () => { selected = inst.name; showTab('play'); launch(); });
+    dir.addEventListener('click', () => call('instances:open', inst.name));
+    del.addEventListener('click', async () => {
+      if (!confirm(`Удалить сборку «${inst.name}» вместе с мирами и модами?`)) return;
+      await call('instances:delete', inst.name);
+      await loadInstances();
+    });
+    row.appendChild(acts);
+    box.appendChild(row);
+  }
+}
+$('search').addEventListener('input', renderList);
+$('newBtn').addEventListener('click', openNew);
+
+function render() { renderPicker(); renderList(); }
+
 async function loadInstances() {
   instances = await call('instances:list');
   if (!instances.some((i) => i.name === selected)) selected = instances[0] ? instances[0].name : null;
   render();
 }
 
-// ---------- запуск и полоса прогресса ----------
-function showStatus(p) {
-  const box = $('status');
-  box.hidden = false;
-  $('meta').hidden = true;
-  box.classList.toggle('err', !!p.error);
-  $('statusText').textContent = p.text + (typeof p.progress === 'number' && p.progress < 1 ? ` — ${Math.round(p.progress * 100)}%` : '');
-  const bar = $('statusBar').parentElement;
-  bar.classList.toggle('indet', typeof p.progress !== 'number');
-  $('statusBar').style.width = typeof p.progress === 'number' ? `${Math.round(p.progress * 100)}%` : '';
-  if (p.stage === 'closed') { busy = false; render(); setTimeout(() => { if (!busy) { box.hidden = true; $('meta').hidden = false; } }, 4000); }
+// ---------- запуск: прогресс прямо в кнопке ----------
+function showProgress(p) {
+  const btn = $('playBtn');
+  const pct = typeof p.progress === 'number' ? p.progress : null;
+  btn.classList.toggle('err', !!p.error);
+  btn.classList.toggle('indet', pct === null && busy);
+  $('playFill').style.width = pct === null ? '' : `${Math.round(pct * 100)}%`;
+  $('playSub').textContent = p.text + (pct !== null && pct < 1 ? ` — ${Math.round(pct * 100)}%` : '');
+  if (p.stage === 'running') { $('playText').textContent = 'ИГРА ИДЁТ'; btn.classList.remove('indet'); }
+  if (p.stage === 'closed' || p.stage === 'error') {
+    busy = false;
+    btn.classList.remove('busy', 'indet');
+    $('playText').textContent = 'ИГРАТЬ';
+    $('playFill').style.width = '0';
+    render();
+    setTimeout(() => { if (!busy) { $('playSub').textContent = ''; btn.classList.remove('err'); } }, 5000);
+  }
 }
-window.voxa.onProgress(showStatus);
+window.voxa.onProgress(showProgress);
 
-$('play').addEventListener('click', async () => {
+async function launch() {
   if (!selected || busy) return;
   busy = true;
+  $('playBtn').classList.add('busy');
+  $('playText').textContent = 'ЗАПУСК';
   render();
   try {
     await call('game:launch', selected);
   } catch (e) {
-    busy = false;
-    render();
-    showStatus({ text: e.message, error: true, progress: null, stage: 'error' });
+    showProgress({ text: e.message, error: true, progress: null, stage: 'error' });
   }
-});
-
-$('openDir').addEventListener('click', () => selected && call('instances:open', selected));
-$('delInst').addEventListener('click', async () => {
-  if (!selected || !confirm(`Удалить сборку «${selected}» вместе с мирами и модами?`)) return;
-  await call('instances:delete', selected);
-  selected = null;
-  await loadInstances();
-});
+}
+$('playBtn').addEventListener('click', launch);
 
 // ---------- новая сборка ----------
 let versionsLoaded = false;
@@ -138,18 +173,22 @@ $('newForm').addEventListener('submit', async (e) => {
   }
 });
 
-// ---------- разделы и настройки ----------
-function showView(name) {
+// ---------- вкладки и настройки ----------
+function showTab(name) {
   document.querySelectorAll('.view').forEach((v) => v.classList.toggle('on', v.id === name));
-  document.querySelectorAll('.rail [data-view]').forEach((b) => b.classList.toggle('on', b.dataset.view === name));
+  document.querySelectorAll('[data-tab]').forEach((b) => b.classList.toggle('on', b.dataset.tab === name));
+  // пункт игры в боковой панели подсвечен на всех её вкладках
+  document.querySelector('.game').classList.toggle('on', name !== 'settings');
 }
-document.querySelectorAll('.rail [data-view]').forEach((b) => b.addEventListener('click', () => showView(b.dataset.view)));
-$('accBtn').addEventListener('click', () => { showView('settings'); $('setNick').focus(); });
+document.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
+$('accBtn').addEventListener('click', () => { showTab('settings'); $('setNick').focus(); });
+
+const setNick = (n) => { $('nick').textContent = n; $('nick2').textContent = n; };
 $('setRam').addEventListener('input', () => { $('ramVal').textContent = $('setRam').value; });
 $('saveSettings').addEventListener('click', async () => {
   try {
     const s = await call('settings:set', { nick: $('setNick').value, ramGb: $('setRam').value });
-    $('nick').textContent = s.nick;
+    setNick(s.nick);
     $('setMsg').textContent = 'Сохранено';
     $('setMsg').classList.remove('err');
   } catch (e) {
@@ -160,7 +199,7 @@ $('saveSettings').addEventListener('click', async () => {
 
 (async function init() {
   const s = await call('settings:get');
-  $('nick').textContent = s.nick;
+  setNick(s.nick);
   $('setNick').value = s.nick;
   $('setRam').value = s.ramGb;
   $('ramVal').textContent = s.ramGb;
