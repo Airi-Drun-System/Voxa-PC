@@ -23,8 +23,8 @@
     "productName": "Voxa",
     "icon": "build/icon.png",
     "files": ["main.js", "preload.js", "lib/**", "src/**", "package.json"],
-    "win": { "artifactName": "Voxa-${version}-${arch}-${target}.${ext}" },
-    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true },
+    "win": { "target": ["nsis", "portable"] },
+    "nsis": { "artifactName": "Voxa-${version}-setup.exe", "oneClick": false, "allowToChangeInstallationDirectory": true },
     "portable": { "artifactName": "Voxa-${version}-portable.exe" }
   }
 }
