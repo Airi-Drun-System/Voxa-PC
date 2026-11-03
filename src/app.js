@@ -1,9 +1,12 @@
 'use strict';
 const $ = (id) => document.getElementById(id);
-const PALETTE = [['#3f8f4a', '#1d3f22'], ['#8a4fd1', '#2d1a52'], ['#d1784f', '#52281a'], ['#4f9ad1', '#1a3552'], ['#c9a23a', '#4a3a10'], ['#d14f7e', '#521a33']];
-const colorsOf = (name) => { let h = 2166136261; for (const ch of name) h = Math.imul(h ^ ch.codePointAt(0), 16777619); return PALETTE[(h >>> 0) % PALETTE.length]; };
-const paint = (el, name) => { const [c1, c2] = colorsOf(name); el.style.setProperty('--c1', c1); el.style.setProperty('--c2', c2); };
+// цвета обложки сборки: светлый низ неба и тёмный верх
+const ART = [['#f2a65a', '#7a3d1d'], ['#7cc3e8', '#2b6cb0'], ['#b48cff', '#3a1f7a'], ['#9be37a', '#2f6b30'], ['#ff9fb2', '#7a1f3d'], ['#ffd36b', '#8a5a12']];
+const hash = (s) => { let h = 2166136261; for (const ch of s) h = Math.imul(h ^ ch.codePointAt(0), 16777619); return h >>> 0; };
+const artOf = (name) => ART[hash(name) % ART.length];
+const paint = (el, name) => { const [c1, c2] = artOf(name); el.style.setProperty('--c1', c1); el.style.setProperty('--c2', c2); };
 const loaderName = (i) => (i.loader === 'fabric' ? 'Fabric' : 'Без модов');
+const modCount = (i) => Object.keys(i.mods || {}).length;
 
 async function call(channel, ...args) {
   const r = await window.voxa.call(channel, ...args);
@@ -14,6 +17,7 @@ async function call(channel, ...args) {
 let instances = [];
 let selected = null;
 let busy = false;
+let nick = 'Player';
 
 function ago(ts) {
   const m = Math.round((Date.now() - ts) / 60000);
@@ -22,75 +26,59 @@ function ago(ts) {
   if (h < 24) return `${h} ч назад`;
   return `${Math.round(h / 24)} дн назад`;
 }
+const modsWord = (n) => (n % 10 === 1 && n % 100 !== 11 ? 'мод' : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20) ? 'мода' : 'модов');
 
-function tileRow(inst, tag) {
-  const el = document.createElement(tag);
-  el.innerHTML = '<i class="tile"></i><span class="info"><b></b><small></small></span>';
-  paint(el.querySelector('.tile'), inst.name);
-  el.querySelector('b').textContent = inst.name;
-  el.querySelector('small').textContent = `${inst.mc} · ${loaderName(inst)}` + (inst.lastPlayed ? ' · ' + ago(inst.lastPlayed) : '');
-  return el;
+// воксельный пейзаж в цветах сборки, у каждой сборки свой рельеф
+function land(name) {
+  const [c1, c2] = name ? artOf(name) : ['#3FE0BF', '#0F3B3A'];
+  const W = 600, H = 300, s = 30, id = 'g' + hash(name || '-');
+  let seed = hash(name || '-') % 233280;
+  const rnd = () => (seed = (seed * 9301 + 49297) % 233280) / 233280;
+  let far = '', near = '', trees = '';
+  for (let x = 0; x < W; x += s) {
+    far += `<rect x="${x}" y="${115 + Math.floor(rnd() * 4) * 18}" width="${s}" height="${H}" fill="${c2}" opacity=".55"/>`;
+    const h = 190 + Math.floor(rnd() * 3) * 15;
+    near += `<rect x="${x}" y="${h}" width="${s}" height="${H}" fill="#4f9d45"/><rect x="${x}" y="${h + 13}" width="${s}" height="${H}" fill="#7a5233"/>`;
+    if (rnd() < .18) trees += `<rect x="${x + 11}" y="${h - 45}" width="8" height="46" fill="#6b4a2b"/><rect x="${x - 4}" y="${h - 78}" width="${s + 8}" height="${s + 8}" fill="#2f6b30"/>`;
+  }
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid slice"><defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${c2}"/><stop offset="1" stop-color="${c1}"/></linearGradient></defs><rect width="${W}" height="${H}" fill="url(#${id})"/><circle cx="${420 + (hash(name || '') % 120)}" cy="70" r="28" fill="#fff3c9" opacity=".9"/>${far}${trees}${near}</svg>`;
 }
 
-// ---------- выбор сборки внизу ----------
-function renderPicker() {
+// ---------- главная ----------
+function renderHome() {
   const cur = instances.find((i) => i.name === selected);
-  $('pickName').textContent = cur ? cur.name : 'Нет сборок';
-  $('pickVer').textContent = cur ? `${cur.mc} · ${loaderName(cur)}` : 'создай первую';
-  paint($('pickTile'), cur ? cur.name : '');
-  $('playBtn').disabled = !cur || busy;
+  $('bg').innerHTML = land(cur && cur.name);
+  $('badge').textContent = cur ? `${loaderName(cur)} · ${cur.mc}` : '';
+  $('title').textContent = cur ? cur.name : 'Voxa';
+  $('sub').textContent = cur
+    ? [cur.loader === 'fabric' ? `${modCount(cur)} ${modsWord(modCount(cur))}` : 'Чистый Minecraft', cur.lastPlayed ? `последний раз ${ago(cur.lastPlayed)}` : 'ещё не запускалась'].join(', ')
+    : 'Создай первую сборку: выбери версию Minecraft, и можно играть.';
+  $('modsCount').textContent = cur ? modCount(cur) : 0;
+  for (const id of ['modsBtn', 'dirBtn', 'delBtn']) $(id).hidden = !cur;
+  if (cur && cur.loader !== 'fabric') $('modsBtn').hidden = true;
+  $('playText').textContent = busy ? $('playText').textContent : cur ? 'Играть' : 'Новая сборка';
+  $('playBtn').disabled = busy;
 
-  const list = $('pickList');
-  list.textContent = '';
-  for (const inst of instances) {
-    const b = tileRow(inst, 'button');
-    b.setAttribute('role', 'option');
-    b.classList.toggle('on', inst.name === selected);
-    b.addEventListener('click', () => { selected = inst.name; list.hidden = true; render(); });
-    list.appendChild(b);
-  }
-  const add = document.createElement('button');
-  add.innerHTML = '<i class="tile" style="--c1:#3a3f47;--c2:#2a2e35"></i><span class="info"><b>+ Новая сборка</b></span>';
-  add.addEventListener('click', () => { list.hidden = true; openNew(); });
-  list.appendChild(add);
-}
-$('pickBtn').addEventListener('click', (e) => { e.stopPropagation(); $('pickList').hidden = !$('pickList').hidden; });
-document.addEventListener('click', (e) => { if (!$('pickList').contains(e.target)) $('pickList').hidden = true; });
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') $('pickList').hidden = true; });
-
-// ---------- вкладка «Сборки» ----------
-function renderList() {
-  const q = $('search').value.trim().toLowerCase();
-  const box = $('list');
+  const box = $('cards');
   box.textContent = '';
-  const shown = instances.filter((i) => i.name.toLowerCase().includes(q) || i.mc.includes(q));
-  if (!shown.length) {
-    box.innerHTML = `<p class="empty">${instances.length ? 'Ничего не нашлось' : 'Пока ни одной сборки. Нажми «+ Новая сборка».'}</p>`;
-    return;
-  }
-  for (const inst of shown) {
-    const row = tileRow(inst, 'div');
-    row.className = 'row';
-    const acts = document.createElement('span');
-    acts.className = 'acts';
-    acts.innerHTML = '<button class="go">Играть</button><button>Папка</button><button class="danger">Удалить</button>';
-    const [go, dir, del] = acts.children;
-    go.disabled = busy;
-    go.addEventListener('click', () => { selected = inst.name; showTab('play'); launch(); });
-    dir.addEventListener('click', () => call('instances:open', inst.name));
-    del.addEventListener('click', async () => {
-      if (!confirm(`Удалить сборку «${inst.name}» вместе с мирами и модами?`)) return;
-      await call('instances:delete', inst.name);
-      await loadInstances();
-    });
-    row.appendChild(acts);
-    box.appendChild(row);
+  const add = document.createElement('button');
+  add.className = 'bc new';
+  add.textContent = '+';
+  add.title = 'Новая сборка';
+  add.addEventListener('click', openNew);
+  box.appendChild(add);
+  for (const inst of instances) {
+    const b = document.createElement('button');
+    b.className = 'bc' + (inst.name === selected ? ' on' : '');
+    b.innerHTML = `<span class="a">${land(inst.name)}</span><span><b></b><small></small></span>`;
+    b.querySelector('b').textContent = inst.name;
+    b.querySelector('small').textContent = `${inst.mc} · ${inst.loader === 'fabric' ? `${modCount(inst)} ${modsWord(modCount(inst))}` : 'без модов'}`;
+    b.addEventListener('click', () => { if (!busy) { selected = inst.name; render(); } });
+    box.appendChild(b);
   }
 }
-$('search').addEventListener('input', renderList);
-$('newBtn').addEventListener('click', openNew);
 
-function render() { renderPicker(); renderList(); renderModInst(); }
+function render() { renderHome(); renderModInst(); }
 
 async function loadInstances() {
   instances = await call('instances:list');
@@ -98,32 +86,45 @@ async function loadInstances() {
   render();
 }
 
-// ---------- запуск: прогресс прямо в кнопке ----------
+$('modsBtn').addEventListener('click', () => { $('modInst').value = selected; openTab('mods'); });
+$('dirBtn').addEventListener('click', () => selected && call('instances:open', selected));
+$('delBtn').addEventListener('click', async () => {
+  if (!selected || busy || !confirm(`Удалить сборку «${selected}» вместе с мирами и модами?`)) return;
+  await call('instances:delete', selected);
+  selected = null;
+  await loadInstances();
+});
+
+// ---------- запуск: прогресс в чипе сверху и в кнопке ----------
+let hideTimer = 0;
 function showProgress(p) {
   if (p.stage === 'pack') { $('modMsg').textContent = p.text; return; }
-  const btn = $('playBtn');
-  const pct = typeof p.progress === 'number' ? p.progress : null;
-  btn.classList.toggle('err', !!p.error);
-  btn.classList.toggle('indet', pct === null && busy);
-  $('playFill').style.width = pct === null ? '' : `${Math.round(pct * 100)}%`;
-  $('playSub').textContent = p.text + (pct !== null && pct < 1 ? ` — ${Math.round(pct * 100)}%` : '');
-  if (p.stage === 'running') { $('playText').textContent = 'ИГРА ИДЁТ'; btn.classList.remove('indet'); }
+  const pct = typeof p.progress === 'number' ? Math.round(p.progress * 100) : null;
+  const st = $('status');
+  clearTimeout(hideTimer);
+  st.hidden = false;
+  st.classList.toggle('err', !!p.error);
+  st.classList.toggle('indet', pct === null && !p.error && busy);
+  st.style.setProperty('--p', pct === null ? 0 : pct);
+  $('statusText').textContent = p.text + (pct !== null && pct < 100 ? ` · ${pct}%` : '');
+  $('playFill').style.width = pct === null || p.stage === 'running' ? '0' : `${pct}%`;
+  if (p.stage === 'running') $('playText').textContent = 'Игра идёт';
   if (p.stage === 'closed' || p.stage === 'error') {
     busy = false;
-    btn.classList.remove('busy', 'indet');
-    $('playText').textContent = 'ИГРАТЬ';
     $('playFill').style.width = '0';
-    render();
-    setTimeout(() => { if (!busy) { $('playSub').textContent = ''; btn.classList.remove('err'); } }, 5000);
+    $('playText').textContent = 'Играть';
+    st.classList.remove('indet');
+    loadInstances();
+    hideTimer = setTimeout(() => { st.hidden = true; }, p.error ? 9000 : 4000);
   }
 }
 window.voxa.onProgress(showProgress);
 
 async function launch() {
-  if (!selected || busy) return;
+  if (busy) return;
+  if (!selected) { openNew(); return; }
   busy = true;
-  $('playBtn').classList.add('busy');
-  $('playText').textContent = 'ЗАПУСК';
+  $('playText').textContent = 'Запуск…';
   render();
   try {
     await call('game:launch', selected);
@@ -132,6 +133,61 @@ async function launch() {
   }
 }
 $('playBtn').addEventListener('click', launch);
+
+// ---------- скин: фигура спереди из PNG 64×64 (или старого 64×32) ----------
+const DEFAULT_SKIN = (() => {
+  // свой скин по умолчанию, рисуем прямо на холсте
+  const c = document.createElement('canvas'); c.width = 64; c.height = 64;
+  const g = c.getContext('2d');
+  const r = (x, y, w, h, col) => { g.fillStyle = col; g.fillRect(x, y, w, h); };
+  r(8, 8, 8, 8, '#e8b48a'); r(8, 8, 8, 2, '#3a2a1f'); r(9, 12, 2, 2, '#1b1b24'); r(13, 12, 2, 2, '#1b1b24'); r(11, 14, 2, 1, '#b07a58');
+  r(20, 20, 8, 12, '#3FE0BF'); r(20, 20, 8, 2, '#14A88F'); r(23, 22, 2, 6, '#B9FFF0');
+  r(44, 20, 4, 12, '#3FE0BF'); r(44, 29, 4, 3, '#e8b48a'); r(36, 52, 4, 12, '#3FE0BF'); r(36, 61, 4, 3, '#e8b48a');
+  r(4, 20, 4, 12, '#2b3a55'); r(4, 29, 4, 3, '#1b2234'); r(20, 52, 4, 12, '#2b3a55'); r(20, 61, 4, 3, '#1b2234');
+  return c;
+})();
+
+function drawSkin(img) {
+  const tall = img.height >= 64;
+  const fig = $('skinCv').getContext('2d');
+  fig.clearRect(0, 0, 16, 32);
+  fig.imageSmoothingEnabled = false;
+  const part = (sx, sy, w, h, dx, dy, mirror) => {
+    if (!mirror) return fig.drawImage(img, sx, sy, w, h, dx, dy, w, h);
+    fig.save(); fig.translate(dx + w, dy); fig.scale(-1, 1); fig.drawImage(img, sx, sy, w, h, 0, 0, w, h); fig.restore();
+  };
+  // основной слой, затем второй (куртка, шапка); у старых скинов левые руки и ноги — зеркало правых
+  part(8, 8, 8, 8, 4, 0); part(20, 20, 8, 12, 4, 8);
+  part(44, 20, 4, 12, 0, 8); part(4, 20, 4, 12, 4, 20);
+  if (tall) { part(36, 52, 4, 12, 12, 8); part(20, 52, 4, 12, 8, 20); } else { part(44, 20, 4, 12, 12, 8, true); part(4, 20, 4, 12, 8, 20, true); }
+  part(40, 8, 8, 8, 4, 0);
+  if (tall) { part(20, 36, 8, 12, 4, 8); part(44, 36, 4, 12, 0, 8); part(52, 52, 4, 12, 12, 8); part(4, 36, 4, 12, 4, 20); part(4, 52, 4, 12, 8, 20); }
+  const face = $('faceCv').getContext('2d');
+  face.imageSmoothingEnabled = false;
+  face.clearRect(0, 0, 8, 8);
+  face.drawImage(img, 8, 8, 8, 8, 0, 0, 8, 8);
+  face.drawImage(img, 40, 8, 8, 8, 0, 0, 8, 8);
+}
+function showSkin(dataUrl) {
+  if (!dataUrl) { drawSkin(DEFAULT_SKIN); return; }
+  const img = new Image();
+  img.onload = () => drawSkin(img);
+  img.src = dataUrl;
+}
+async function pickSkin() {
+  try {
+    const url = await call('skin:pick');
+    if (url) showSkin(url);
+  } catch (e) {
+    $('setMsg').textContent = e.message;
+    $('setMsg').classList.add('err');
+    openTab('settings');
+  }
+}
+$('skinBtn').addEventListener('click', pickSkin);
+$('skinPick').addEventListener('click', pickSkin);
+$('skinReset').addEventListener('click', async () => { await call('skin:reset'); showSkin(null); });
+$('railFace').addEventListener('click', () => openTab('settings'));
 
 // ---------- моды и сборки с Modrinth ----------
 const kind = () => document.querySelector('input[name=kind]:checked').value;
@@ -151,7 +207,7 @@ function renderModInst() {
 function modRow(icon, title, sub, btnText, onClick, danger) {
   const row = document.createElement('div');
   row.className = 'row';
-  row.innerHTML = '<img class="tile" alt=""><span class="info"><b></b><small></small></span><span class="acts"><button></button></span>';
+  row.innerHTML = '<img class="tile" alt=""><span class="info"><b></b><small></small></span><span class="acts2"><button></button></span>';
   const img = row.querySelector('img');
   if (icon) img.src = icon;
   else { const t = document.createElement('i'); t.className = 'tile'; paint(t, title); img.replaceWith(t); }
@@ -182,7 +238,7 @@ async function searchMods() {
   $('modInst').hidden = k === 'modpack';
   $('modSearch').hidden = k === 'installed';
   if (k !== 'modpack' && !inst) {
-    box.innerHTML = '<p class="empty">Моды ставятся в сборку на Fabric. Создай её во вкладке «Сборки».</p>';
+    box.innerHTML = '<p class="empty">Моды ставятся в сборку на Fabric. Создай её на главной: «+ Новая».</p>';
     return;
   }
   if (k === 'installed') {
@@ -216,7 +272,7 @@ async function searchMods() {
       box.appendChild(modRow(h.icon, h.title, sub, 'Установить сборку', (b) => withBusyButton(b, 'Ставлю…', async () => {
         const created = await call('packs:install', h.id, h.title);
         selected = created.name;
-        $('modMsg').textContent = `Сборка «${created.name}» готова. Жми ИГРАТЬ.`;
+        $('modMsg').textContent = `Сборка «${created.name}» готова. Жми «Играть».`;
       })));
     } else {
       const has = inst.mods && inst.mods[h.id];
@@ -272,20 +328,15 @@ $('newForm').addEventListener('submit', async (e) => {
   }
 });
 
-// ---------- вкладки и настройки ----------
-function showTab(name) {
+// ---------- разделы и настройки ----------
+function openTab(name) {
   document.querySelectorAll('.view').forEach((v) => v.classList.toggle('on', v.id === name));
   document.querySelectorAll('[data-tab]').forEach((b) => b.classList.toggle('on', b.dataset.tab === name));
-  // пункт игры в боковой панели подсвечен на всех её вкладках
-  document.querySelector('.game').classList.toggle('on', name !== 'settings');
+  if (name === 'mods') { $('modMsg').textContent = ''; searchMods(); }
 }
-document.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => {
-  showTab(b.dataset.tab);
-  if (b.dataset.tab === 'mods' && !$('modList').childElementCount) searchMods();
-}));
-$('accBtn').addEventListener('click', () => { showTab('settings'); $('setNick').focus(); });
+document.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => openTab(b.dataset.tab)));
 
-const setNick = (n) => { $('nick').textContent = n; $('nick2').textContent = n; };
+function setNick(n) { nick = n; $('nick').textContent = n; }
 $('setRam').addEventListener('input', () => { $('ramVal').textContent = $('setRam').value; });
 $('saveSettings').addEventListener('click', async () => {
   try {
@@ -305,5 +356,6 @@ $('saveSettings').addEventListener('click', async () => {
   $('setNick').value = s.nick;
   $('setRam').value = s.ramGb;
   $('ramVal').textContent = s.ramGb;
+  showSkin(await call('skin:get'));
   await loadInstances();
 })();

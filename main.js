@@ -1,11 +1,11 @@
 'use strict';
-const { app, BrowserWindow, ipcMain, shell, net, session } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, net, session, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { Client, Authenticator } = require('minecraft-launcher-core');
 const AdmZip = require('adm-zip');
 const crypto = require('crypto');
-const { safeName, javaFeature, validNick, fabricId, insideDir, allowedUrl } = require('./lib/util');
+const { safeName, javaFeature, validNick, fabricId, insideDir, allowedUrl, skinSize } = require('./lib/util');
 
 // Всё хранится в %APPDATA%\Voxa: общие файлы игры в shared, у каждой сборки своя папка с модами и мирами
 const ROOT = path.join(app.getPath('appData'), 'Voxa');
@@ -13,6 +13,7 @@ const SHARED = path.join(ROOT, 'shared');
 const INSTANCES = path.join(ROOT, 'instances');
 const JAVA_DIR = path.join(ROOT, 'java');
 const SETTINGS = path.join(ROOT, 'settings.json');
+const SKIN = path.join(ROOT, 'skin.png');
 const MANIFEST = 'https://piston-meta.mojang.com/mc/game/version_manifest_v2.json';
 for (const d of [SHARED, INSTANCES, JAVA_DIR]) fs.mkdirSync(d, { recursive: true });
 
@@ -210,6 +211,13 @@ async function launch(name, report) {
     }
   }
 
+  // скин для мода CustomSkinLoader: без мода файл просто лежит и ничему не мешает
+  if (fs.existsSync(SKIN)) {
+    const dest = path.join(dir, 'CustomSkinLoader', 'LocalSkin', 'skins', `${settings.nick}.png`);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.copyFileSync(SKIN, dest);
+  }
+
   inst.lastPlayed = Date.now();
   writeJson(path.join(dir, 'instance.json'), inst);
 
@@ -247,7 +255,7 @@ async function launch(name, report) {
 function createWindow() {
   const win = new BrowserWindow({
     width: 1180, height: 700, minWidth: 900, minHeight: 560,
-    backgroundColor: '#0f1218',
+    backgroundColor: '#08161B',
     title: 'Voxa',
     icon: path.join(__dirname, 'build', 'icon.png'),
     autoHideMenuBar: true,
@@ -290,6 +298,19 @@ handle('mods:remove', (_e, name, projectId) => {
   return inst;
 });
 handle('packs:install', (event, projectId, title) => installPack(projectId, title, (p) => event.sender.send('progress', p)));
+const skinUrl = () => (fs.existsSync(SKIN) ? 'data:image/png;base64,' + fs.readFileSync(SKIN).toString('base64') : null);
+handle('skin:get', () => skinUrl());
+handle('skin:pick', async (event) => {
+  const r = await dialog.showOpenDialog(BrowserWindow.fromWebContents(event.sender), { title: 'Скин Minecraft', filters: [{ name: 'PNG', extensions: ['png'] }], properties: ['openFile'] });
+  if (r.canceled || !r.filePaths[0]) return null;
+  const buf = fs.readFileSync(r.filePaths[0]);
+  const size = skinSize(buf);
+  if (!size) throw new Error('Это не PNG-файл');
+  if (size.w !== 64 || (size.h !== 64 && size.h !== 32)) throw new Error(`Скин должен быть 64×64, а этот ${size.w}×${size.h}`);
+  fs.writeFileSync(SKIN, buf);
+  return skinUrl();
+});
+handle('skin:reset', () => { fs.rmSync(SKIN, { force: true }); return null; });
 handle('game:launch', (event, name) => launch(name, (p) => event.sender.send('progress', p)));
 
 app.whenReady().then(createWindow);

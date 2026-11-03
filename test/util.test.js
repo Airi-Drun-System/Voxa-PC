@@ -1,7 +1,7 @@
 'use strict';
 const assert = require('assert');
 const path = require('path');
-const { safeName, javaFeature, validNick, fabricId, insideDir, allowedUrl } = require('../lib/util');
+const { safeName, javaFeature, validNick, fabricId, insideDir, allowedUrl, skinSize } = require('../lib/util');
 
 assert.strictEqual(safeName('Выживание 1.21'), 'Выживание 1.21');
 assert.strictEqual(safeName('a/b\\c:d*?"<>|'), 'abcd');
@@ -28,4 +28,7 @@ assert.ok(allowedUrl('https://cdn.modrinth.com/data/x.jar'));
 assert.ok(!allowedUrl('http://cdn.modrinth.com/data/x.jar'));
 assert.ok(!allowedUrl('https://evil.com/x.jar'));
 assert.ok(!allowedUrl('https://cdn.modrinth.com.evil.com/x.jar'));
+const png = Buffer.alloc(24); png.write('\x89PNG\r\n\x1a\n', 0, 'latin1'); png.writeUInt32BE(13, 8); png.write('IHDR', 12, 'latin1'); png.writeUInt32BE(64, 16); png.writeUInt32BE(32, 20);
+assert.deepStrictEqual(skinSize(png), { w: 64, h: 32 });
+assert.strictEqual(skinSize(Buffer.from('not a png at all, really')), null);
 console.log('util: ok');
