@@ -16,15 +16,33 @@
   },
   "devDependencies": {
     "electron": "33.2.1",
-    "electron-builder": "25.1.8"
+    "electron-builder": "25.1.8",
+    "skinview3d": "^3.4.2"
   },
   "build": {
     "appId": "com.vegasdev.voxa.pc",
     "productName": "Voxa",
     "icon": "build/icon.png",
-    "files": ["main.js", "preload.js", "lib/**", "src/**", "package.json"],
-    "win": { "target": ["nsis", "portable"] },
-    "nsis": { "artifactName": "Voxa-${version}-setup.exe", "oneClick": false, "allowToChangeInstallationDirectory": true },
-    "portable": { "artifactName": "Voxa-${version}-portable.exe" }
+    "files": [
+      "main.js",
+      "preload.js",
+      "lib/**",
+      "src/**",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "artifactName": "Voxa-${version}-setup.exe",
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "portable": {
+      "artifactName": "Voxa-${version}-portable.exe"
+    }
   }
 }

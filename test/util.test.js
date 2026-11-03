@@ -1,7 +1,7 @@
 'use strict';
 const assert = require('assert');
 const path = require('path');
-const { safeName, javaFeature, validNick, fabricId, insideDir, allowedUrl, skinSize } = require('../lib/util');
+const { safeName, javaFeature, validNick, fabricId, insideDir, allowedUrl, skinSize, contentType, contentDir, baseFile, isContentFile, uniqueName } = require('../lib/util');
 
 assert.strictEqual(safeName('Выживание 1.21'), 'Выживание 1.21');
 assert.strictEqual(safeName('a/b\\c:d*?"<>|'), 'abcd');
@@ -31,4 +31,14 @@ assert.ok(!allowedUrl('https://cdn.modrinth.com.evil.com/x.jar'));
 const png = Buffer.alloc(24); png.write('\x89PNG\r\n\x1a\n', 0, 'latin1'); png.writeUInt32BE(13, 8); png.write('IHDR', 12, 'latin1'); png.writeUInt32BE(64, 16); png.writeUInt32BE(32, 20);
 assert.deepStrictEqual(skinSize(png), { w: 64, h: 32 });
 assert.strictEqual(skinSize(Buffer.from('not a png at all, really')), null);
+assert.strictEqual(contentType('shader'), 'shader');
+assert.strictEqual(contentType('../x'), 'mod');
+assert.strictEqual(contentDir('shader'), 'shaderpacks');
+assert.strictEqual(baseFile('sodium.jar.disabled'), 'sodium.jar');
+assert.ok(isContentFile('sodium.jar.disabled', 'mod'));
+assert.ok(!isContentFile('config.txt', 'mod'));
+assert.ok(isContentFile('Faithful.zip', 'resourcepack'));
+const taken = new Set(['Мир', 'Мир 2']);
+assert.strictEqual(uniqueName('Мир', (n) => taken.has(n)), 'Мир 3');
+assert.strictEqual(uniqueName('Новый', (n) => taken.has(n)), 'Новый');
 console.log('util: ok');

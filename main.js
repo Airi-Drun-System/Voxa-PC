@@ -5,7 +5,7 @@ const fs = require('fs');
 const { Client, Authenticator } = require('minecraft-launcher-core');
 const AdmZip = require('adm-zip');
 const crypto = require('crypto');
-const { safeName, javaFeature, validNick, fabricId, insideDir, allowedUrl, skinSize } = require('./lib/util');
+const { safeName, javaFeature, validNick, fabricId, insideDir, allowedUrl, skinSize, contentType, contentDir, isContentFile, baseFile, uniqueName } = require('./lib/util');
 
 // Всё хранится в %APPDATA%\Voxa: общие файлы игры в shared, у каждой сборки своя папка с модами и мирами
 const ROOT = path.join(app.getPath('appData'), 'Voxa');
@@ -101,65 +101,152 @@ async function createInstance({ name, mc, loader }) {
   return inst;
 }
 
-// ---------- моды и сборки с Modrinth ----------
+// ---------- контент сборки: моды, ресурспаки, шейдеры ----------
 async function download(url, dest, sha1) {
   if (!allowedUrl(url)) throw new Error(`Файл не с Modrinth: ${url}`);
   const r = await fetch(url, { headers: HEADERS });
   if (!r.ok) throw new Error(`Не скачалось (${r.status}): ${url}`);
   const buf = Buffer.from(await r.arrayBuffer());
-  if (sha1 && crypto.createHash('sha1').update(buf).digest('hex') !== sha1) throw new Error(`Файл повреждён: ${path.basename(dest)}`);
+  if (sha1 && crypto.createHash('sha1').update(buf).digest('hex') !== sha1) throw new Error(`Файл повреждён: ${path.basename(dest || url)}`);
   if (dest) { fs.mkdirSync(path.dirname(dest), { recursive: true }); fs.writeFileSync(dest, buf); }
   return buf;
 }
+async function postJson(url, body) {
+  const r = await fetch(url, { method: 'POST', headers: { ...HEADERS, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (!r.ok) throw new Error(`Modrinth ответил ${r.status}`);
+  return r.json();
+}
 const q = (v) => encodeURIComponent(JSON.stringify(v));
 const sha1Of = (f) => f.hashes && f.hashes.sha1;
+const fileSha1 = (p) => crypto.createHash('sha1').update(fs.readFileSync(p)).digest('hex');
+const primary = (v) => v.files.find((f) => f.primary) || v.files[0];
+const LOADERS = { mod: ['fabric'], resourcepack: ['minecraft'], shader: ['iris'] };
 
-async function searchModrinth({ query, kind, mc }) {
-  const facets = [[`project_type:${kind === 'modpack' ? 'modpack' : 'mod'}`], ['categories:fabric']];
-  if (kind !== 'modpack' && mc) facets.push([`versions:${mc}`]);
-  const r = await getJson(`${MODRINTH}/search?limit=30&index=${query ? 'relevance' : 'downloads'}&query=${encodeURIComponent(query || '')}&facets=${q(facets)}`);
-  return r.hits.map((h) => ({ id: h.project_id, title: h.title, desc: h.description, icon: h.icon_url, downloads: h.downloads, author: h.author }));
+async function searchModrinth({ query, kind, mc, offset, sort }) {
+  const type = ['modpack', 'resourcepack', 'shader'].includes(kind) ? kind : 'mod';
+  const facets = [[`project_type:${type}`]];
+  if (type === 'mod' || type === 'modpack') facets.push(['categories:fabric']);
+  if (type === 'shader') facets.push(['categories:iris']);
+  if (type !== 'modpack' && mc) facets.push([`versions:${mc}`]);
+  const index = ['relevance', 'downloads', 'newest', 'updated'].includes(sort) ? sort : query ? 'relevance' : 'downloads';
+  const r = await getJson(`${MODRINTH}/search?limit=24&offset=${Number(offset) || 0}&index=${index}&query=${encodeURIComponent(query || '')}&facets=${q(facets)}`);
+  return { total: r.total_hits, hits: r.hits.map((h) => ({ id: h.project_id, title: h.title, desc: h.description, icon: h.icon_url, downloads: h.downloads, author: h.author })) };
 }
 
-// ставит мод и все обязательные для него моды (например, Fabric API)
-async function installMod(inst, dir, projectId, title, seen = new Set()) {
-  if (seen.has(projectId)) return;
-  seen.add(projectId);
-  const versions = await getJson(`${MODRINTH}/project/${encodeURIComponent(projectId)}/version?loaders=${q(['fabric'])}&game_versions=${q([inst.mc])}`);
-  const v = versions[0];
-  if (!v) throw new Error(`У мода ${title || projectId} нет версии под ${inst.mc} Fabric`);
-  const file = v.files.find((f) => f.primary) || v.files[0];
-  const name = path.basename(file.filename);
-  inst.mods = inst.mods || {};
-  const old = inst.mods[projectId];
-  await download(file.url, insideDir(dir, path.join('mods', name)), sha1Of(file));
-  if (old && old.file !== name) fs.rmSync(path.join(dir, 'mods', old.file), { force: true });
-  inst.mods[projectId] = { file: name, title: title || name.replace(/\.jar$/, '') };
-  for (const d of v.dependencies || []) {
-    if (d.dependency_type === 'required' && d.project_id && !inst.mods[d.project_id]) await installMod(inst, dir, d.project_id, null, seen);
-  }
-}
-
-function fabricInstance(name) {
+function readInstance(name) {
   const dir = instanceDir(name);
   const inst = readJson(path.join(dir, 'instance.json'), null);
   if (!inst) throw new Error('Сборка не найдена');
-  if (inst.loader !== 'fabric') throw new Error('Моды ставятся только в сборки на Fabric');
-  return { inst, dir };
+  inst.mods = inst.mods || {};
+  return { inst, dir, save: () => writeJson(path.join(dir, 'instance.json'), inst) };
+}
+function needsFabric(inst, type) {
+  if (type !== 'resourcepack' && inst.loader !== 'fabric') throw new Error('Моды и шейдеры ставятся только в сборки на Fabric');
 }
 
-async function installPack(projectId, title, report) {
-  const versions = await getJson(`${MODRINTH}/project/${encodeURIComponent(projectId)}/version?loaders=${q(['fabric'])}`);
+// ставит мод, ресурспак или шейдер; для модов ещё и обязательные зависимости (например, Fabric API)
+async function installContent(inst, dir, projectId, info, seen = new Set()) {
+  if (seen.has(projectId)) return;
+  seen.add(projectId);
+  const type = info.type || 'mod';
+  const versions = await getJson(`${MODRINTH}/project/${encodeURIComponent(projectId)}/version?loaders=${q(LOADERS[type])}&game_versions=${q([inst.mc])}`);
   const v = versions[0];
-  if (!v) throw new Error('Пока ставлю только сборки на Fabric');
-  const packFile = v.files.find((f) => f.primary) || v.files[0];
-  report({ stage: 'pack', text: 'Скачиваю сборку' });
-  const zip = new AdmZip(await download(packFile.url, null, sha1Of(packFile)));
-  const index = JSON.parse(zip.readAsText('modrinth.index.json'));
+  if (!v) throw new Error(`У «${info.title || projectId}» нет версии под ${inst.mc}`);
+  const file = primary(v);
+  const name = path.basename(file.filename);
+  const old = inst.mods[projectId];
+  await download(file.url, insideDir(dir, path.join(contentDir(type), name)), sha1Of(file));
+  if (old && old.file !== name) fs.rmSync(insideDir(dir, path.join(contentDir(type), old.file)), { force: true });
+  inst.mods[projectId] = { file: name, title: info.title || name.replace(/\.(jar|zip)$/, ''), type, icon: info.icon || (old && old.icon) || null, version: v.version_number };
+  if (type !== 'mod') return;
+  for (const d of v.dependencies || []) {
+    if (d.dependency_type === 'required' && d.project_id && !inst.mods[d.project_id]) await installContent(inst, dir, d.project_id, { type: 'mod' }, seen);
+  }
+}
+
+// список файлов в папке контента; моды, положенные руками, узнаём на Modrinth по хешу
+async function listContent(name, type) {
+  const { inst, dir, save } = readInstance(name);
+  const folder = path.join(dir, contentDir(type));
+  const files = fs.existsSync(folder) ? fs.readdirSync(folder).filter((f) => isContentFile(f, type)) : [];
+  const byFile = new Map(Object.entries(inst.mods).filter(([, m]) => (m.type || 'mod') === type).map(([id, m]) => [m.file, id]));
+  const unknown = files.filter((f) => !byFile.has(baseFile(f)));
+  if (unknown.length) {
+    try {
+      const hashes = Object.fromEntries(unknown.map((f) => [fileSha1(path.join(folder, f)), f]));
+      const found = await postJson(`${MODRINTH}/version_files`, { hashes: Object.keys(hashes), algorithm: 'sha1' });
+      const ids = [...new Set(Object.values(found).map((v) => v.project_id))];
+      const projects = ids.length ? await getJson(`${MODRINTH}/projects?ids=${q(ids)}`) : [];
+      for (const [hash, v] of Object.entries(found)) {
+        const p = projects.find((x) => x.id === v.project_id);
+        const f = baseFile(hashes[hash]);
+        inst.mods[v.project_id] = { file: f, title: p ? p.title : f, type, icon: p ? p.icon_url : null, version: v.version_number };
+        byFile.set(f, v.project_id);
+      }
+      if (ids.length) save();
+    } catch { /* без сети просто покажем имена файлов */ }
+  }
+  return files.map((f) => {
+    const id = byFile.get(baseFile(f));
+    const m = id ? inst.mods[id] : null;
+    return { file: f, enabled: !f.endsWith('.disabled'), id, title: m ? m.title : baseFile(f), icon: m ? m.icon : null, version: m ? m.version : '', size: fs.statSync(path.join(folder, f)).size };
+  }).sort((a, b) => a.title.localeCompare(b.title));
+}
+
+function toggleContent(name, type, file) {
+  const { dir } = readInstance(name);
+  const from = insideDir(dir, path.join(contentDir(type), path.basename(file)));
+  const to = file.endsWith('.disabled') ? from.slice(0, -'.disabled'.length) : from + '.disabled';
+  fs.renameSync(from, to);
+  return path.basename(to);
+}
+function removeContent(name, type, file) {
+  const { inst, dir, save } = readInstance(name);
+  fs.rmSync(insideDir(dir, path.join(contentDir(type), path.basename(file))), { force: true });
+  for (const [id, m] of Object.entries(inst.mods)) if (m.file === baseFile(file)) delete inst.mods[id];
+  save();
+  return true;
+}
+
+// обновления модов одним запросом по хешам, как в Prism
+async function checkUpdates(name) {
+  const { inst, dir } = readInstance(name);
+  const folder = path.join(dir, 'mods');
+  if (!fs.existsSync(folder)) return [];
+  const files = fs.readdirSync(folder).filter((f) => isContentFile(f, 'mod'));
+  const hashes = Object.fromEntries(files.map((f) => [fileSha1(path.join(folder, f)), f]));
+  if (!files.length) return [];
+  const latest = await postJson(`${MODRINTH}/version_files/update`, { hashes: Object.keys(hashes), algorithm: 'sha1', loaders: ['fabric'], game_versions: [inst.mc] });
+  return Object.entries(latest)
+    .filter(([hash, v]) => sha1Of(primary(v)) !== hash)
+    .map(([hash, v]) => ({ file: hashes[hash], projectId: v.project_id, version: v.version_number, url: primary(v).url, newFile: path.basename(primary(v).filename), sha1: sha1Of(primary(v)) }));
+}
+async function applyUpdates(name, report) {
+  const list = await checkUpdates(name);
+  const { inst, dir, save } = readInstance(name);
+  let done = 0;
+  for (const u of list) {
+    const disabled = u.file.endsWith('.disabled');
+    await download(u.url, insideDir(dir, path.join('mods', u.newFile + (disabled ? '.disabled' : ''))), u.sha1);
+    if (u.file !== u.newFile + (disabled ? '.disabled' : '')) fs.rmSync(insideDir(dir, path.join('mods', u.file)), { force: true });
+    const m = inst.mods[u.projectId];
+    if (m) Object.assign(m, { file: u.newFile, version: u.version });
+    report({ stage: 'pack', text: `Обновляю моды ${++done}/${list.length}` });
+  }
+  save();
+  return list.length;
+}
+
+// ---------- сборки с Modrinth и из файла .mrpack ----------
+async function installPackBuffer(buf, title, report) {
+  const zip = new AdmZip(buf);
+  const indexEntry = zip.getEntry('modrinth.index.json');
+  if (!indexEntry) throw new Error('Это не сборка Modrinth (.mrpack)');
+  const index = JSON.parse(indexEntry.getData().toString('utf8'));
   const deps = index.dependencies || {};
   if (!deps.minecraft || !deps['fabric-loader']) throw new Error('Пока ставлю только сборки на Fabric');
 
-  const inst = await createInstance({ name: title, mc: deps.minecraft, loader: 'fabric' });
+  const inst = await createInstance({ name: uniqueName(title || index.name, (n) => fs.existsSync(instanceDir(n))), mc: deps.minecraft, loader: 'fabric' });
   const dir = instanceDir(inst.name);
   try {
     inst.loaderVersion = deps['fabric-loader'];
@@ -185,70 +272,124 @@ async function installPack(projectId, title, report) {
     throw err;
   }
 }
+async function installPack(projectId, title, report) {
+  const versions = await getJson(`${MODRINTH}/project/${encodeURIComponent(projectId)}/version?loaders=${q(['fabric'])}`);
+  if (!versions[0]) throw new Error('Пока ставлю только сборки на Fabric');
+  const packFile = primary(versions[0]);
+  report({ stage: 'pack', text: 'Скачиваю сборку' });
+  return installPackBuffer(await download(packFile.url, null, sha1Of(packFile)), title, report);
+}
 
+// ---------- управление сборкой ----------
+function listWorlds(name) {
+  const saves = path.join(instanceDir(name), 'saves');
+  if (!fs.existsSync(saves)) return [];
+  return fs.readdirSync(saves, { withFileTypes: true })
+    .filter((d) => d.isDirectory() && fs.existsSync(path.join(saves, d.name, 'level.dat')))
+    .map((d) => {
+      const icon = path.join(saves, d.name, 'icon.png');
+      return { name: d.name, mtime: fs.statSync(path.join(saves, d.name, 'level.dat')).mtimeMs, icon: fs.existsSync(icon) ? 'data:image/png;base64,' + fs.readFileSync(icon).toString('base64') : null };
+    })
+    .sort((a, b) => b.mtime - a.mtime);
+}
+function updateInstance(name, patch) {
+  const { inst, dir, save } = readInstance(name);
+  if (patch.ramGb !== undefined) inst.ramGb = patch.ramGb ? Math.min(32, Math.max(1, Math.round(Number(patch.ramGb)))) : null;
+  save();
+  if (patch.name !== undefined && safeName(patch.name) !== inst.name) {
+    if (running) throw new Error('Закрой игру, потом переименуй');
+    const clean = safeName(patch.name);
+    if (fs.existsSync(instanceDir(clean))) throw new Error('Сборка с таким названием уже есть');
+    fs.renameSync(dir, instanceDir(clean));
+    inst.name = clean;
+    writeJson(path.join(instanceDir(clean), 'instance.json'), inst);
+  }
+  return inst;
+}
+function copyInstance(name) {
+  const { inst, dir } = readInstance(name);
+  const clean = uniqueName(`${inst.name} копия`, (n) => fs.existsSync(instanceDir(n)));
+  fs.cpSync(dir, instanceDir(clean), { recursive: true });
+  const copy = { ...inst, name: clean, created: Date.now() };
+  delete copy.lastPlayed;
+  delete copy.playTime;
+  writeJson(path.join(instanceDir(clean), 'instance.json'), copy);
+  return copy;
+}
+
+// ---------- запуск ----------
 let running = null;
-async function launch(name, report) {
-  if (running) throw new Error('Игра уже запускается');
-  const dir = instanceDir(name);
-  const inst = readJson(path.join(dir, 'instance.json'), null);
-  if (!inst) throw new Error('Сборка не найдена');
+async function launch(name, report, log) {
+  if (running) throw new Error('Игра уже запущена');
+  const { inst, dir, save } = readInstance(name);
   const settings = getSettings();
   if (!validNick(settings.nick)) throw new Error('Ник: 3–16 латинских букв, цифр или _');
+  running = { name, proc: null };
+  try {
+    report({ stage: 'prepare', text: 'Готовлю сборку', progress: null });
+    const entry = (await manifest()).versions.find((v) => v.id === inst.mc);
+    if (!entry) throw new Error(`Версия ${inst.mc} не найдена у Mojang`);
+    const versionJson = await getJson(entry.url);
+    const javaPath = await ensureJava(versionJson.javaVersion && versionJson.javaVersion.majorVersion, report);
 
-  report({ stage: 'prepare', text: 'Готовлю сборку', progress: null });
-  const entry = (await manifest()).versions.find((v) => v.id === inst.mc);
-  if (!entry) throw new Error(`Версия ${inst.mc} не найдена у Mojang`);
-  const versionJson = await getJson(entry.url);
-  const javaPath = await ensureJava(versionJson.javaVersion && versionJson.javaVersion.majorVersion, report);
-
-  let custom;
-  if (inst.loader === 'fabric') {
-    custom = fabricId(inst.mc, inst.loaderVersion);
-    const profilePath = path.join(SHARED, 'versions', custom, `${custom}.json`);
-    if (!fs.existsSync(profilePath)) {
-      report({ stage: 'loader', text: 'Ставлю Fabric', progress: null });
-      writeJson(profilePath, await getJson(`https://meta.fabricmc.net/v2/versions/loader/${inst.mc}/${inst.loaderVersion}/profile/json`));
+    let custom;
+    if (inst.loader === 'fabric') {
+      custom = fabricId(inst.mc, inst.loaderVersion);
+      const profilePath = path.join(SHARED, 'versions', custom, `${custom}.json`);
+      if (!fs.existsSync(profilePath)) {
+        report({ stage: 'loader', text: 'Ставлю Fabric', progress: null });
+        writeJson(profilePath, await getJson(`https://meta.fabricmc.net/v2/versions/loader/${inst.mc}/${inst.loaderVersion}/profile/json`));
+      }
     }
-  }
 
-  // скин для мода CustomSkinLoader: без мода файл просто лежит и ничему не мешает
-  if (fs.existsSync(SKIN)) {
-    const dest = path.join(dir, 'CustomSkinLoader', 'LocalSkin', 'skins', `${settings.nick}.png`);
-    fs.mkdirSync(path.dirname(dest), { recursive: true });
-    fs.copyFileSync(SKIN, dest);
-  }
+    // скин для мода CustomSkinLoader: без мода файл просто лежит и ничему не мешает
+    if (fs.existsSync(SKIN)) {
+      const dest = path.join(dir, 'CustomSkinLoader', 'LocalSkin', 'skins', `${settings.nick}.png`);
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.copyFileSync(SKIN, dest);
+    }
 
-  inst.lastPlayed = Date.now();
-  writeJson(path.join(dir, 'instance.json'), inst);
+    inst.lastPlayed = Date.now();
+    save();
 
-  // загрузчик файлов игры видит прокси только из переменных окружения
-  // shortcut: SOCKS-прокси он не умеет, тогда нужен VPN в режиме TUN
-  const proxy = /PROXY ([^;\s]+)/.exec(await session.defaultSession.resolveProxy('https://piston-data.mojang.com'));
-  if (proxy) process.env.HTTPS_PROXY = process.env.HTTP_PROXY = `http://${proxy[1]}`;
+    // загрузчик файлов игры видит прокси только из переменных окружения
+    // shortcut: SOCKS-прокси он не умеет, тогда нужен VPN в режиме TUN
+    const proxy = /PROXY ([^;\s]+)/.exec(await session.defaultSession.resolveProxy('https://piston-data.mojang.com'));
+    if (proxy) process.env.HTTPS_PROXY = process.env.HTTP_PROXY = `http://${proxy[1]}`;
 
-  const client = new Client();
-  running = client;
-  let started = false;
-  client.on('progress', (e) => report({ stage: 'files', text: e.type === 'assets' ? 'Скачиваю ресурсы игры' : 'Скачиваю файлы игры', progress: e.total ? e.task / e.total : null }));
-  client.on('data', () => {
-    if (!started) { started = true; report({ stage: 'running', text: 'Игра запущена', progress: 1 }); }
-  });
-  client.on('close', (code) => {
+    const client = new Client();
+    let started = 0;
+    client.on('progress', (e) => report({ stage: 'files', text: e.type === 'assets' ? 'Скачиваю ресурсы игры' : 'Скачиваю файлы игры', progress: e.total ? e.task / e.total : null }));
+    client.on('debug', (m) => log(`[Voxa] ${m}`));
+    client.on('data', (d) => {
+      log(String(d));
+      if (!started) { started = Date.now(); report({ stage: 'running', text: 'Игра запущена', progress: 1 }); }
+    });
+    client.on('close', (code) => {
+      running = null;
+      if (started) {
+        // перечитываем: пока шла игра, сборку могли поменять в лаунчере
+        const fresh = readJson(path.join(dir, 'instance.json'), null);
+        if (fresh) { fresh.playTime = (fresh.playTime || 0) + (Date.now() - started); writeJson(path.join(dir, 'instance.json'), fresh); }
+      }
+      report({ stage: 'closed', text: code ? `Игра закрылась с ошибкой (код ${code}), смотри лог` : 'Игра закрыта', progress: null, error: !!code, code });
+    });
+
+    const proc = await client.launch({
+      authorization: Authenticator.getAuth(settings.nick),
+      root: SHARED,
+      version: { number: inst.mc, type: 'release', custom },
+      memory: { max: `${inst.ramGb || settings.ramGb}G`, min: '1G' },
+      javaPath,
+      overrides: { gameDirectory: dir }
+    });
+    if (!proc) throw new Error('Не удалось запустить игру, подробности в логе');
+    if (running) running.proc = proc;
+    return true;
+  } catch (e) {
     running = null;
-    report({ stage: 'closed', text: code ? `Игра закрылась с ошибкой (код ${code})` : 'Игра закрыта', progress: null, error: !!code });
-  });
-
-  const opts = {
-    authorization: Authenticator.getAuth(settings.nick),
-    root: SHARED,
-    version: { number: inst.mc, type: 'release', custom },
-    memory: { max: `${settings.ramGb}G`, min: '1G' },
-    javaPath,
-    overrides: { gameDirectory: dir }
-  };
-  const proc = await client.launch(opts);
-  if (!proc) { running = null; throw new Error('Не удалось запустить игру, подробности в логе'); }
-  return true;
+    throw e;
+  }
 }
 
 // ---------- окно ----------
@@ -282,22 +423,39 @@ handle('settings:set', (_e, patch) => {
 handle('versions:list', async () => (await manifest()).versions.filter((v) => v.type === 'release').map((v) => v.id));
 handle('instances:list', () => listInstances());
 handle('instances:create', (_e, data) => createInstance(data));
-handle('instances:delete', (_e, name) => { fs.rmSync(instanceDir(name), { recursive: true, force: true }); return true; });
+handle('instances:delete', (_e, name) => {
+  if (running && running.name === safeName(name)) throw new Error('Сначала закрой игру');
+  fs.rmSync(instanceDir(name), { recursive: true, force: true });
+  return true;
+});
 handle('instances:open', (_e, name) => shell.openPath(instanceDir(name)));
+handle('instances:copy', (_e, name) => copyInstance(name));
+handle('instances:update', (_e, name, patch) => updateInstance(name, patch || {}));
+handle('instances:openSub', (_e, name, sub) => {
+  const p = insideDir(instanceDir(name), ['mods', 'resourcepacks', 'shaderpacks', 'saves', 'screenshots', 'logs'].includes(sub) ? sub : 'mods');
+  fs.mkdirSync(p, { recursive: true });
+  return shell.openPath(p);
+});
+handle('instances:worlds', (_e, name) => listWorlds(name));
+handle('content:list', (_e, name, type) => listContent(name, contentType(type)));
+handle('content:toggle', (_e, name, type, file) => toggleContent(name, contentType(type), file));
+handle('content:remove', (_e, name, type, file) => removeContent(name, contentType(type), file));
+handle('content:install', async (_e, name, projectId, info) => {
+  const { inst, dir, save } = readInstance(name);
+  const type = contentType(info && info.type);
+  needsFabric(inst, type);
+  try { await installContent(inst, dir, projectId, { ...info, type }); } finally { save(); }
+  return inst;
+});
+handle('mods:updates', (_e, name) => checkUpdates(name));
+handle('mods:updateAll', (event, name) => applyUpdates(name, (p) => event.sender.send('progress', p)));
 handle('mods:search', (_e, opts) => searchModrinth(opts || {}));
-handle('mods:install', async (_e, name, projectId, title) => {
-  const { inst, dir } = fabricInstance(name);
-  try { await installMod(inst, dir, projectId, title); } finally { writeJson(path.join(dir, 'instance.json'), inst); }
-  return inst;
-});
-handle('mods:remove', (_e, name, projectId) => {
-  const { inst, dir } = fabricInstance(name);
-  const m = inst.mods && inst.mods[projectId];
-  if (m) { fs.rmSync(insideDir(dir, path.join('mods', m.file)), { force: true }); delete inst.mods[projectId]; }
-  writeJson(path.join(dir, 'instance.json'), inst);
-  return inst;
-});
 handle('packs:install', (event, projectId, title) => installPack(projectId, title, (p) => event.sender.send('progress', p)));
+handle('packs:import', async (event) => {
+  const r = await dialog.showOpenDialog(BrowserWindow.fromWebContents(event.sender), { title: 'Сборка Modrinth', filters: [{ name: 'Сборка Modrinth', extensions: ['mrpack'] }], properties: ['openFile'] });
+  if (r.canceled || !r.filePaths[0]) return null;
+  return installPackBuffer(fs.readFileSync(r.filePaths[0]), path.basename(r.filePaths[0], '.mrpack'), (p) => event.sender.send('progress', p));
+});
 const skinUrl = () => (fs.existsSync(SKIN) ? 'data:image/png;base64,' + fs.readFileSync(SKIN).toString('base64') : null);
 handle('skin:get', () => skinUrl());
 handle('skin:pick', async (event) => {
@@ -311,7 +469,11 @@ handle('skin:pick', async (event) => {
   return skinUrl();
 });
 handle('skin:reset', () => { fs.rmSync(SKIN, { force: true }); return null; });
-handle('game:launch', (event, name) => launch(name, (p) => event.sender.send('progress', p)));
+handle('game:launch', (event, name) => {
+  const send = (ch, v) => { if (!event.sender.isDestroyed()) event.sender.send(ch, v); };
+  return launch(name, (p) => send('progress', p), (line) => send('log', line));
+});
+handle('game:stop', () => { if (running && running.proc) running.proc.kill(); return !!running; });
 
 app.whenReady().then(createWindow);
 app.on('window-all-closed', () => app.quit());

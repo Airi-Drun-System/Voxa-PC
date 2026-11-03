@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://cdn.modrinth.com">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.modrinth.com">
 <title>Voxa</title>
 <link rel="stylesheet" href="style.css">
 </head>
@@ -10,26 +10,33 @@
 
 <nav class="rail" aria-label="Разделы">
   <svg class="logo" viewBox="0 0 108 108" aria-label="Voxa"><path d="M54 22 82 37.8 54 53.5 26 37.8Z" fill="#B9FFF0"/><path d="M26 37.8 54 53.5v32.5L26 70.3Z" fill="#3FE0BF"/><path d="M82 37.8 54 53.5v32.5l28-15.7Z" fill="#14A88F"/></svg>
+  <span class="railDot" id="railDot"></span>
   <button class="ic on" data-tab="home" title="Главная"><svg viewBox="0 0 24 24"><path d="M3 11l9-7 9 7v9H3z"/></svg></button>
-  <button class="ic" data-tab="mods" title="Моды"><svg viewBox="0 0 24 24"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/></svg></button>
+  <button class="ic" data-tab="inst" title="Сборка"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg></button>
+  <button class="ic" data-tab="catalog" title="Каталог Modrinth"><svg viewBox="0 0 24 24"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/></svg></button>
   <button class="ic" data-tab="settings" title="Настройки"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3M5 5l2 2m10 10 2 2M5 19l2-2M17 7l2-2"/></svg></button>
-  <button class="face" id="railFace" title="Скин"><canvas id="faceCv" width="8" height="8"></canvas></button>
+  <button class="face" id="railFace" title="Скин и ник"><canvas id="faceCv" width="8" height="8"></canvas></button>
 </nav>
 
-<!-- Главная: обложка сборки на весь экран -->
+<!-- ============ Главная ============ -->
 <main id="home" class="view on">
-  <div class="bg" id="bg"></div><div class="shade"></div>
-  <div class="status" id="status" hidden><i id="ring"></i><span id="statusText"></span></div>
+  <div class="bg" id="bgA"></div><div class="bg" id="bgB"></div><div class="shade"></div>
 
-  <section class="hero">
+  <section class="hero" id="hero">
     <span class="badge" id="badge"></span>
     <h1 id="title"></h1>
     <p id="sub"></p>
     <div class="acts">
       <button class="glass" id="modsBtn">Моды <em id="modsCount">0</em></button>
+      <button class="glass" id="manageBtn">Управление</button>
       <button class="glass r" id="dirBtn" title="Открыть папку сборки"><svg viewBox="0 0 24 24"><path d="M3 7h6l2 2h10v10H3z"/></svg></button>
-      <button class="glass r" id="delBtn" title="Удалить сборку"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg></button>
     </div>
+  </section>
+
+  <section class="stage" id="stage" title="Покрути мышкой. Клик по нику — сменить скин">
+    <canvas id="skin3d"></canvas>
+    <canvas id="skinCv" width="16" height="32" hidden></canvas>
+    <button class="nickTag" id="skinBtn"><b id="nick">Player</b><small>Сменить скин</small></button>
   </section>
 
   <section class="strip" aria-label="Сборки">
@@ -37,30 +44,97 @@
     <div class="cards" id="cards"></div>
   </section>
 
-  <button class="skin" id="skinBtn" title="Сменить скин">
-    <canvas id="skinCv" width="16" height="32"></canvas>
-    <b id="nick">Player</b><small>Сменить скин</small>
-  </button>
-
-  <button class="play" id="playBtn"><span class="fill" id="playFill"></span><b id="playText">Играть</b></button>
+  <button class="play" id="playBtn"><span class="fill" id="playFill"></span><span class="shine"></span><b id="playText">Играть</b></button>
 </main>
 
-<!-- Моды: поиск и установка с Modrinth -->
-<main id="mods" class="view page">
-  <h2>Моды</h2>
+<!-- ============ Страница сборки ============ -->
+<main id="inst" class="view page">
+  <header class="instHead">
+    <div class="instCover" id="instCover"></div>
+    <div class="instInfo">
+      <h2 id="instTitle"></h2>
+      <p id="instFacts"></p>
+    </div>
+    <div class="instActs">
+      <button class="ghostBtn" id="instCopy">Копия</button>
+      <button class="ghostBtn" id="instDir">Папка</button>
+      <button class="primary" id="instPlay">Играть</button>
+    </div>
+  </header>
+  <nav class="tabs" id="instTabs">
+    <button class="on" data-itab="mod">Моды</button>
+    <button data-itab="resourcepack">Ресурспаки</button>
+    <button data-itab="shader">Шейдеры</button>
+    <button data-itab="worlds">Миры</button>
+    <button data-itab="log">Лог</button>
+    <button data-itab="opts">Настройки</button>
+    <span class="tabLine" id="tabLine"></span>
+  </nav>
+
+  <section class="ipane on" id="paneContent">
+    <div class="listHead">
+      <input id="localSearch" placeholder="Найти в сборке" spellcheck="false">
+      <span class="grow"></span>
+      <button class="ghostBtn" id="updBtn">Проверить обновления</button>
+      <button class="ghostBtn" id="subDir">Папка</button>
+      <button class="primary" id="addBtn">+ Добавить</button>
+    </div>
+    <div class="updBar" id="updBar" hidden><span id="updText"></span><button class="primary" id="updAll">Обновить всё</button></div>
+    <div class="list" id="contentList"></div>
+  </section>
+
+  <section class="ipane" id="paneWorlds">
+    <div class="listHead"><span class="grow"></span><button class="ghostBtn" id="savesDir">Папка миров</button><button class="ghostBtn" id="shotsDir">Скриншоты</button></div>
+    <div class="list" id="worldList"></div>
+  </section>
+
+  <section class="ipane" id="paneLog">
+    <div class="listHead">
+      <span class="logState" id="logState">Игра не запущена</span>
+      <span class="grow"></span>
+      <button class="ghostBtn" id="logCopy">Копировать</button>
+      <button class="ghostBtn" id="logsDir">Папка логов</button>
+      <button class="dangerBtn" id="stopBtn" disabled>Остановить игру</button>
+    </div>
+    <pre class="log" id="logPre"></pre>
+  </section>
+
+  <section class="ipane" id="paneOpts">
+    <label class="field">Название<input id="optName" maxlength="40" spellcheck="false"></label>
+    <div class="field">Память для этой сборки
+      <span class="ramRow"><label class="check"><input type="checkbox" id="optRamOwn"><span></span>Своя</label><input id="optRam" type="range" min="1" max="16" step="1"><b id="optRamVal"></b></span>
+      <small>Без галочки берётся память из общих настроек.</small>
+    </div>
+    <button class="primary" id="optSave">Сохранить</button>
+    <div class="danger">
+      <b>Удалить сборку</b><small>Удалятся миры, моды и настройки этой сборки.</small>
+      <button class="dangerBtn" id="optDel">Удалить</button>
+    </div>
+  </section>
+</main>
+
+<!-- ============ Каталог Modrinth ============ -->
+<main id="catalog" class="view page">
+  <h2>Каталог</h2>
   <div class="listHead">
     <div class="seg" role="radiogroup" aria-label="Что искать">
       <label><input type="radio" name="kind" value="mod" checked><span>Моды</span></label>
       <label><input type="radio" name="kind" value="modpack"><span>Сборки</span></label>
-      <label><input type="radio" name="kind" value="installed"><span>Установленные</span></label>
+      <label><input type="radio" name="kind" value="resourcepack"><span>Ресурспаки</span></label>
+      <label><input type="radio" name="kind" value="shader"><span>Шейдеры</span></label>
     </div>
-    <select id="modInst" aria-label="Сборка для модов"></select>
-    <input id="modSearch" placeholder="Поиск на Modrinth" spellcheck="false">
+    <select id="catInst" aria-label="Куда ставить"></select>
+    <select id="catSort" aria-label="Сортировка"><option value="">Популярные</option><option value="newest">Новые</option><option value="updated">Обновлённые</option></select>
   </div>
-  <p class="msg" id="modMsg"></p>
-  <div class="list" id="modList"></div>
+  <div class="listHead">
+    <input id="catSearch" placeholder="Поиск на Modrinth" spellcheck="false">
+    <button class="ghostBtn" id="importBtn" hidden>Импорт .mrpack</button>
+  </div>
+  <div class="list" id="catList"></div>
+  <button class="ghostBtn more" id="catMore" hidden>Показать ещё</button>
 </main>
 
+<!-- ============ Настройки ============ -->
 <main id="settings" class="view page">
   <h2>Настройки</h2>
   <label class="field">Ник в игре
@@ -72,10 +146,9 @@
   </label>
   <div class="field">Скин
     <span class="skinRow"><button class="ghostBtn" id="skinPick">Выбрать PNG</button><button class="ghostBtn" id="skinReset">Убрать</button></span>
-    <small>Файл скина 64×64. В игре он виден с модом CustomSkinLoader: его можно поставить во вкладке «Моды».</small>
+    <small>Файл скина 64×64. В игре он виден с модом CustomSkinLoader, его можно поставить из каталога.</small>
   </div>
   <button class="primary" id="saveSettings">Сохранить</button>
-  <p class="msg" id="setMsg"></p>
 </main>
 
 <dialog id="newDlg">
@@ -92,6 +165,10 @@
   </form>
 </dialog>
 
+<div class="status" id="status" hidden><i id="ring"></i><span id="statusText"></span></div>
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<script src="vendor/skinview3d.bundle.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
