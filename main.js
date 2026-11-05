@@ -1,5 +1,5 @@
 'use strict';
-const { app, BrowserWindow, ipcMain, shell, net, session, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, net, session, dialog, safeStorage } = require('electron');
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
@@ -7,6 +7,7 @@ const { Client, Authenticator } = require('minecraft-launcher-core');
 const AdmZip = require('adm-zip');
 const crypto = require('crypto');
 const { safeName, javaFeature, validNick, fabricId, insideDir, allowedUrl, skinSize, contentType, contentDir, isContentFile, baseFile, uniqueName } = require('./lib/util');
+const msauth = require('./lib/msauth');
 
 // Всё хранится в %APPDATA%\Voxa: общие файлы игры в shared, у каждой сборки своя папка с модами и мирами
 const ROOT = path.join(app.getPath('appData'), 'Voxa');
@@ -15,6 +16,8 @@ const INSTANCES = path.join(ROOT, 'instances');
 const JAVA_DIR = path.join(ROOT, 'java');
 const SETTINGS = path.join(ROOT, 'settings.json');
 const SKIN = path.join(ROOT, 'skin.png');
+const ACCOUNT = path.join(ROOT, 'account.bin');
+const ACCOUNT_SKIN = path.join(ROOT, 'account-skin.png');
 const MANIFEST = 'https://piston-meta.mojang.com/mc/game/version_manifest_v2.json';
 for (const d of [SHARED, INSTANCES, JAVA_DIR]) fs.mkdirSync(d, { recursive: true });
 
@@ -320,14 +323,111 @@ function copyInstance(name) {
 
 // ---------- запуск ----------
 let running = null;
+// ---------- аккаунт Microsoft ----------
+// Без входа игра идёт под офлайн-ником. С входом — под профилем Minecraft: сервера с проверкой аккаунта и свой скин.
+// Токены лежат в account.bin, зашифрованные средствами Windows (safeStorage): на другом ПК или под другим
+// пользователем Windows их не расшифровать. Пароль Voxa не видит: его вводят на странице Microsoft.
+const LOGIN_PARTITION = 'persist:msauth';
+let account; // undefined — файл ещё не читали, null — входа нет
+
+function getAccount() {
+  if (account === undefined) {
+    account = null;
+    try {
+      if (fs.existsSync(ACCOUNT) && safeStorage.isEncryptionAvailable()) account = JSON.parse(safeStorage.decryptString(fs.readFileSync(ACCOUNT)));
+    } catch { account = null; }
+  }
+  return account;
+}
+function saveAccount(a) {
+  account = a;
+  if (!a) { fs.rmSync(ACCOUNT, { force: true }); fs.rmSync(ACCOUNT_SKIN, { force: true }); return; }
+  // без шифрования (бывает на Linux без связки ключей) вход живёт только до закрытия лаунчера
+  if (safeStorage.isEncryptionAvailable()) fs.writeFileSync(ACCOUNT, safeStorage.encryptString(JSON.stringify(a)));
+}
+// скин аккаунта для витрины качаем сами: окну лаунчера сторонние сайты закрыты
+async function saveAccountSkin(a) {
+  try {
+    if (!a.skin) { fs.rmSync(ACCOUNT_SKIN, { force: true }); return; }
+    const r = await fetch(a.skin.url);
+    const buf = Buffer.from(await r.arrayBuffer());
+    if (r.ok && skinSize(buf)) fs.writeFileSync(ACCOUNT_SKIN, buf);
+  } catch { /* без картинки скина вход всё равно работает */ }
+}
+// окну отдаём только ник и скин, токены остаются здесь
+function accountInfo() {
+  const a = getAccount();
+  if (!a) return null;
+  const skin = fs.existsSync(ACCOUNT_SKIN) ? 'data:image/png;base64,' + fs.readFileSync(ACCOUNT_SKIN).toString('base64') : null;
+  return { name: a.name, uuid: a.uuid, skin };
+}
+
+// окно со страницей входа Microsoft; когда вход пройден, Microsoft перенаправляет его на REDIRECT с кодом
+function microsoftLogin(parent) {
+  return new Promise((resolve, reject) => {
+    const win = new BrowserWindow({
+      parent: parent || undefined, modal: !!parent, width: 500, height: 660,
+      title: 'Вход в аккаунт Microsoft', icon: path.join(__dirname, 'build', 'icon.png'), autoHideMenuBar: true, backgroundColor: '#ffffff',
+      webPreferences: { partition: LOGIN_PARTITION, contextIsolation: true, nodeIntegration: false, sandbox: true }
+    });
+    let done = false;
+    const end = (err, code) => {
+      if (done) return;
+      done = true;
+      if (!win.isDestroyed()) win.destroy();
+      if (err) reject(err); else resolve(code);
+    };
+    const watch = (e, url) => {
+      const r = msauth.parseRedirect((e && e.url) || url);
+      if (!r) return;
+      if (e && typeof e.preventDefault === 'function') e.preventDefault();
+      if (r.code) end(null, r.code);
+      else end(new Error(r.error === 'access_denied' ? 'Вход отменён' : `Microsoft: ${r.description || r.error}`));
+    };
+    win.webContents.on('will-redirect', watch);
+    win.webContents.on('will-navigate', watch);
+    win.webContents.on('did-navigate', watch);
+    // «создать аккаунт», справка и прочие новые окна — в обычном браузере
+    win.webContents.setWindowOpenHandler(({ url }) => { if (/^https:\/\//.test(url)) shell.openExternal(url); return { action: 'deny' }; });
+    win.on('closed', () => end(new Error('Вход отменён')));
+    win.loadURL(msauth.authorizeUrl()).catch((e) => {
+      // ERR_ABORTED — страница сама ушла на другой адрес или мы перехватили код, это не ошибка
+      if (e.code !== 'ERR_ABORTED') end(new Error(`Не открылась страница входа Microsoft (${e.code || e.message})`));
+    });
+  });
+}
+
+// данные игрока для запуска: аккаунт Microsoft (с обновлением входа) или офлайн-ник
+async function authorization(settings, report, log) {
+  let a = getAccount();
+  if (!a) return Authenticator.getAuth(settings.nick);
+  if (!msauth.fresh(a)) {
+    report({ stage: 'auth', text: 'Обновляю вход Microsoft', progress: null });
+    try {
+      a = Object.assign(await msauth.refresh(fetch, a), { clientId: a.clientId });
+      saveAccount(a);
+      saveAccountSkin(a);
+    } catch (e) {
+      if (e.relogin) { saveAccount(null); throw new Error(`${e.message}: Настройки → «Войти через Microsoft»`); }
+      // нет связи с Microsoft: запускаем с прошлым входом, одиночная игра и LAN работают
+      log(`[Voxa] Не получилось обновить вход Microsoft (${e.message}), запускаю с прошлым входом`);
+    }
+  }
+  return msauth.toMclc(a);
+}
+
 async function launch(name, report, log) {
   if (running) throw new Error('Игра уже запущена');
   const { inst, dir, save } = readInstance(name);
   const settings = getSettings();
-  if (!validNick(settings.nick)) throw new Error('Ник: 3–16 латинских букв, цифр или _');
+  if (!getAccount() && !validNick(settings.nick)) throw new Error('Ник: 3–16 латинских букв, цифр или _');
   running = { name, proc: null };
   try {
     report({ stage: 'prepare', text: 'Готовлю сборку', progress: null });
+    const auth = await authorization(settings, report, log);
+    const online = auth.meta && auth.meta.type === 'msa';
+    // minecraft-launcher-core пишет в лог все аргументы запуска, токен оттуда вырезаем
+    const say = (line) => log(online ? msauth.hideToken(line, auth.access_token) : line);
     const entry = (await manifest()).versions.find((v) => v.id === inst.mc);
     if (!entry) throw new Error(`Версия ${inst.mc} не найдена у Mojang`);
     const versionJson = await getJson(entry.url);
@@ -343,8 +443,9 @@ async function launch(name, report, log) {
       }
     }
 
-    // скин для мода CustomSkinLoader: без мода файл просто лежит и ничему не мешает
-    if (fs.existsSync(SKIN)) {
+    // скин для мода CustomSkinLoader: без мода файл просто лежит и ничему не мешает.
+    // С аккаунтом Microsoft в игре и так виден скин аккаунта, его видят и другие игроки
+    if (!online && fs.existsSync(SKIN)) {
       const dest = path.join(dir, 'CustomSkinLoader', 'LocalSkin', 'skins', `${settings.nick}.png`);
       fs.mkdirSync(path.dirname(dest), { recursive: true });
       fs.copyFileSync(SKIN, dest);
@@ -361,9 +462,9 @@ async function launch(name, report, log) {
     const client = new Client();
     let started = 0;
     client.on('progress', (e) => report({ stage: 'files', text: e.type === 'assets' ? 'Скачиваю ресурсы игры' : 'Скачиваю файлы игры', progress: e.total ? e.task / e.total : null }));
-    client.on('debug', (m) => log(`[Voxa] ${m}`));
+    client.on('debug', (m) => say(`[Voxa] ${m}`));
     client.on('data', (d) => {
-      log(String(d));
+      say(String(d));
       if (!started) { started = Date.now(); report({ stage: 'running', text: 'Игра запущена', progress: 1 }); }
     });
     client.on('close', (code) => {
@@ -377,7 +478,7 @@ async function launch(name, report, log) {
     });
 
     const proc = await client.launch({
-      authorization: Authenticator.getAuth(settings.nick),
+      authorization: auth,
       root: SHARED,
       version: { number: inst.mc, type: 'release', custom },
       // вся память сразу и настройки сборщика мусора как у официального лаунчера: без них игра подвисает на очистке памяти
@@ -541,6 +642,25 @@ handle('skin:pick', async (event) => {
   return skinUrl();
 });
 handle('skin:reset', () => { fs.rmSync(SKIN, { force: true }); return null; });
+handle('account:get', () => accountInfo());
+let loggingIn = false;
+handle('account:login', async (event) => {
+  if (loggingIn) throw new Error('Окно входа уже открыто');
+  loggingIn = true;
+  try {
+    const code = await microsoftLogin(BrowserWindow.fromWebContents(event.sender));
+    const a = Object.assign(await msauth.login(fetch, code), { clientId: crypto.randomUUID() });
+    saveAccount(a);
+    await saveAccountSkin(a);
+    return accountInfo();
+  } finally { loggingIn = false; }
+});
+handle('account:logout', async () => {
+  saveAccount(null);
+  // забываем и вход на странице Microsoft, иначе следующий вход молча пустит тот же аккаунт
+  await session.fromPartition(LOGIN_PARTITION).clearStorageData();
+  return null;
+});
 handle('horizon:status', () => horizonStatus());
 handle('horizon:install', (event) => horizonInstall((p) => { if (!event.sender.isDestroyed()) event.sender.send('progress', p); }));
 handle('horizon:launch', () => horizonLaunch());

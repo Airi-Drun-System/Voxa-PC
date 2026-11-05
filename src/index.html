@@ -37,7 +37,7 @@
   <section class="stage" id="stage" title="Покрути мышкой. Клик по нику — сменить скин">
     <canvas id="skin3d"></canvas>
     <canvas id="skinCv" width="16" height="32" hidden></canvas>
-    <button class="nickTag" id="skinBtn"><b id="nick">Player</b><small>Сменить скин</small></button>
+    <button class="nickTag" id="skinBtn"><b id="nick">Player</b><small id="nickSub">Сменить скин</small></button>
   </section>
 
   <section class="strip" aria-label="Сборки">
@@ -153,7 +153,7 @@
     <li><b>Неофициальный проект</b> энтузиастов, не от Mojang. Voxa скачивает его только с GitHub автора и сверяет контрольную сумму.</li>
     <li><b>Нужна своя копия Minecraft Java Edition:</b> при первом запуске Horizon готовит игру из версии 26.3. Если её нет, он предложит скачать.</li>
     <li><b>Моды Fabric и шейдеры тут не работают.</b> У Horizon свои моды, они ставятся внутри его лаунчера.</li>
-    <li><b>Вход Microsoft пока не поддерживается:</b> одиночная игра, LAN и сервера без проверки аккаунта.</li>
+    <li><b>Вход Microsoft из Voxa сюда не переходит:</b> у Horizon свой лаунчер, в нём пока одиночная игра, LAN и сервера без проверки аккаунта.</li>
     <li><b>Нужна видеокарта с Vulkan</b>, любая современная подойдёт.</li>
   </ul>
 </main>
@@ -161,16 +161,24 @@
 <!-- ============ Настройки ============ -->
 <main id="settings" class="view page">
   <h2>Настройки</h2>
+  <div class="field">Аккаунт
+    <div class="acc">
+      <span class="accText"><b id="accName">Без входа</b><small id="accSub">Одиночная игра, LAN и сервера без проверки аккаунта</small></span>
+      <button class="primary" id="accLogin">Войти через Microsoft</button>
+      <button class="ghostBtn" id="accLogout" hidden>Выйти</button>
+    </div>
+    <small>Нужен аккаунт Microsoft, на котором куплена Minecraft: Java Edition (или есть Game Pass). Пароль вводится на странице Microsoft, Voxa его не видит.</small>
+  </div>
   <label class="field">Ник в игре
     <input id="setNick" maxlength="16" spellcheck="false" placeholder="Player">
-    <small>3–16 символов: латиница, цифры, _</small>
+    <small id="nickHint">3–16 символов: латиница, цифры, _</small>
   </label>
   <label class="field"><span>Память для игры: <b id="ramVal">4</b> ГБ</span>
     <input id="setRam" type="range" min="1" max="16" step="1" value="4">
   </label>
   <div class="field">Скин
     <span class="skinRow"><button class="ghostBtn" id="skinPick">Выбрать PNG</button><button class="ghostBtn" id="skinReset">Убрать</button></span>
-    <small>Файл скина 64×64. В игре он виден с модом CustomSkinLoader, его можно поставить из каталога.</small>
+    <small id="skinHint">Файл скина 64×64. В игре он виден с модом CustomSkinLoader, его можно поставить из каталога.</small>
   </div>
   <label class="check field" style="flex-direction:row"><input type="checkbox" id="setMin"><span></span>Сворачивать лаунчер, пока идёт игра</label>
   <button class="primary" id="saveSettings">Сохранить</button>

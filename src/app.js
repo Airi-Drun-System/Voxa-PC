@@ -197,6 +197,8 @@ async function launch() {
   } catch (e) {
     showProgress({ text: e.message, error: true, progress: null, stage: 'error' });
   }
+  // перед запуском вход могли обновить (новый скин) или он устарел и сброшен
+  refreshAccount();
 }
 $('playBtn').addEventListener('click', launch);
 $('instPlay').addEventListener('click', launch);
@@ -309,12 +311,50 @@ function showSkin(dataUrl, greet) {
 async function pickSkin() {
   try {
     const url = await call('skin:pick');
-    if (url) { showSkin(url, true); toast('Скин обновлён'); }
+    if (url) { localSkin = url; showSkin(url, true); toast('Скин обновлён'); }
   } catch (e) { toast(e.message, true); }
 }
-$('skinBtn').addEventListener('click', pickSkin);
+$('skinBtn').addEventListener('click', () => (acc ? openTab('settings') : pickSkin()));
 $('skinPick').addEventListener('click', pickSkin);
-$('skinReset').addEventListener('click', async () => { await call('skin:reset'); showSkin(null); toast('Вернул скин по умолчанию'); });
+$('skinReset').addEventListener('click', async () => { await call('skin:reset'); localSkin = null; showSkin(null); toast('Вернул скин по умолчанию'); });
+
+// ==================== аккаунт Microsoft ====================
+let acc = null;        // { name, uuid, skin } или null — игра под офлайн-ником
+let localSkin = null;  // свой PNG для офлайн-игры
+let offlineNick = 'Player';
+const SKIN_HINT = $('skinHint').textContent;
+function renderAccount(greet) {
+  $('accName').textContent = acc ? acc.name : 'Без входа';
+  $('accSub').textContent = acc ? 'Аккаунт Microsoft: сервера с проверкой аккаунта и твой скин' : 'Одиночная игра, LAN и сервера без проверки аккаунта';
+  $('accLogin').hidden = !!acc;
+  $('accLogout').hidden = !acc;
+  $('setNick').disabled = !!acc;
+  $('nickHint').textContent = acc ? 'Пока ты вошёл через Microsoft, ник берётся из профиля Minecraft' : '3–16 символов: латиница, цифры, _';
+  $('skinPick').disabled = $('skinReset').disabled = !!acc;
+  $('skinHint').textContent = acc ? 'В игре виден скин аккаунта, его меняют на minecraft.net' : SKIN_HINT;
+  $('nick').textContent = acc ? acc.name : offlineNick;
+  $('nickSub').textContent = acc ? 'Аккаунт Microsoft' : 'Сменить скин';
+  showSkin(acc ? acc.skin : localSkin, greet);
+}
+async function refreshAccount() {
+  try {
+    const a = await call('account:get');
+    const changed = JSON.stringify(a) !== JSON.stringify(acc);
+    acc = a;
+    if (changed) renderAccount();
+  } catch { /* оставляем как было */ }
+}
+$('accLogin').addEventListener('click', () => busyBtn($('accLogin'), 'Входим…', async () => {
+  try { acc = await call('account:login'); } catch (e) { if (e.message === 'Вход отменён') return; throw e; }
+  renderAccount(true);
+  toast(`Привет, ${acc.name}! Игра теперь запускается с твоим аккаунтом`);
+}));
+$('accLogout').addEventListener('click', () => busyBtn($('accLogout'), 'Выходим…', async () => {
+  await call('account:logout');
+  acc = null;
+  renderAccount();
+  toast(`Вышел из аккаунта, играешь как ${offlineNick}`);
+}));
 $('railFace').addEventListener('click', () => openTab('settings'));
 
 // ==================== страница сборки ====================
@@ -686,7 +726,8 @@ document.querySelectorAll('.rail [data-tab]').forEach((b) => b.addEventListener(
 $('setRam').addEventListener('input', () => { $('ramVal').textContent = $('setRam').value; });
 $('saveSettings').addEventListener('click', () => busyBtn($('saveSettings'), 'Сохраняю…', async () => {
   const s = await call('settings:set', { nick: $('setNick').value, ramGb: $('setRam').value, minimize: $('setMin').checked });
-  $('nick').textContent = s.nick;
+  offlineNick = s.nick;
+  $('nick').textContent = acc ? acc.name : s.nick;
   globalRam = s.ramGb;
   toast('Настройки сохранены');
 }));
@@ -694,13 +735,15 @@ $('saveSettings').addEventListener('click', () => busyBtn($('saveSettings'), 'С
 (async function init() {
   $('railDot').style.top = document.querySelector('.rail [data-tab=home]').offsetTop + 'px';
   const s = await call('settings:get');
-  $('nick').textContent = s.nick;
+  offlineNick = s.nick;
   globalRam = s.ramGb;
   $('setNick').value = s.nick;
   $('setRam').value = s.ramGb;
   $('ramVal').textContent = s.ramGb;
   $('setMin').checked = s.minimize !== false;
   initViewer();
-  showSkin(await call('skin:get'));
+  localSkin = await call('skin:get');
+  acc = await call('account:get').catch(() => null);
+  renderAccount();
   await loadInstances();
 })();
